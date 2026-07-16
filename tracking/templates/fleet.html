@@ -1,0 +1,141 @@
+{% extends 'tracking/base.html' %}
+{% comment %}
+=============================================================================
+ DASHBOARD DE FLOTA
+=============================================================================
+Cómo funciona esta página:
+ 1. Django entrega este HTML sin datos (solo la estructura).
+ 2. Al cargar, el JavaScript de abajo llama a /api/fleet/ con fetch().
+ 3. Con el JSON recibido pinta: las 4 tarjetas, el mapa y la tabla.
+ 4. setInterval repite el paso 2-3 cada 60 segundos (auto-actualización).
+
+El mapa usa Leaflet (librería gratuita) con mosaicos de OpenStreetMap.
+Cada unidad es un círculo: verde = encendida, gris = apagada.
+=============================================================================
+{% endcomment %}
+{% block title %}Flota — Rastreo Satelital{% endblock %}
+{% block nav_fleet %}active{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  #mapa { height: 420px; border-radius: 8px; z-index: 1; }
+  .leaflet-container { background: var(--grid); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tiles">
+  <div class="tile"><div class="label">Unidades</div><div class="value" id="t-total">—</div></div>
+  <div class="tile"><div class="label">Reportando hoy</div><div class="value" id="t-hoy">—</div></div>
+  <div class="tile"><div class="label">Encendidas</div><div class="value" id="t-on">—</div></div>
+  <div class="tile"><div class="label">En movimiento</div><div class="value" id="t-mov">—</div></div>
+</div>
+
+<div class="card">
+  <h2>Mapa de la flota</h2>
+  <p class="desc">Última posición reportada por cada unidad. Verde = encendida, gris = apagada.</p>
+  <div id="mapa"></div>
+</div>
+
+<div class="card">
+  <h2>Unidades</h2>
+  <p class="desc">Último reporte de cada unidad de rastreo. Se actualiza cada 60 segundos.</p>
+  <div class="scroll-x">
+  <table id="tabla">
+    <thead>
+      <tr>
+        <th>Unidad</th><th>Placa</th><th>Estado</th>
+        <th class="num">Velocidad (km/h)</th><th>Último reporte</th><th>Ubicación</th>
+      </tr>
+    </thead>
+    <tbody><tr><td colspan="6" class="muted">Cargando…</td></tr></tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  let mapa = null, capaMarcadores = null, mapaAjustado = false;
+
+  function iniciarMapa() {
+    mapa = L.map('mapa');
+    mapa.setView([10.9, -74.8], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap',
+    }).addTo(mapa);
+    capaMarcadores = L.layerGroup().addTo(mapa);
+  }
+
+  function pintarMapa(unidades) {
+    capaMarcadores.clearLayers();
+    const puntos = [];
+    const css = getComputedStyle(document.documentElement);
+    const cGood = css.getPropertyValue('--good').trim();
+    const cOff = css.getPropertyValue('--baseline').trim();
+    unidades.forEach(u => {
+      if (u.lat === null || u.lng === null) return;
+      puntos.push([u.lat, u.lng]);
+      const marker = L.circleMarker([u.lat, u.lng], {
+        radius: 7, weight: 2, color: '#ffffff', fillOpacity: 0.95,
+        fillColor: u.ignicion ? cGood : cOff,
+      });
+      marker.bindPopup(
+        `<b>${u.unidad}</b> (${u.placa})<br>` +
+        `Velocidad: ${u.velocidad} km/h · Ignición: ${u.ignicion ? 'ON' : 'OFF'}<br>` +
+        `${u.fecha_reporte}<br>${u.domicilio}`
+      );
+      capaMarcadores.addLayer(marker);
+    });
+    if (puntos.length && !mapaAjustado) {
+      mapa.fitBounds(puntos, { padding: [30, 30] });
+      mapaAjustado = true;
+    }
+  }
+
+  function pintarTabla(unidades) {
+    const tbody = document.querySelector('#tabla tbody');
+    if (!unidades.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">Sin unidades.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = unidades.map(u => `
+      <tr>
+        <td><b>${u.unidad}</b></td>
+        <td>${u.placa || ''}</td>
+        <td><span class="dot ${u.ignicion ? 'on' : 'off'}"></span>${u.ignicion ? 'Encendida' : 'Apagada'}</td>
+        <td class="num">${fmt(u.velocidad)}</td>
+        <td class="${u.reporto_hoy ? '' : 'muted'}">${u.fecha_reporte}</td>
+        <td class="muted">${u.domicilio}</td>
+      </tr>`).join('');
+  }
+
+  async function cargar() {
+    document.getElementById('estado').textContent = 'Actualizando…';
+    try {
+      const resp = await fetch('{% url "tracking:api_fleet" %}');
+      const data = await resp.json();
+      if (data.error) { mostrarAviso(data.error); return; }
+      ocultarAviso();
+      document.getElementById('t-total').textContent = fmt(data.stats.total);
+      document.getElementById('t-hoy').textContent = fmt(data.stats.reportando_hoy);
+      document.getElementById('t-on').textContent = fmt(data.stats.encendidas);
+      document.getElementById('t-mov').textContent = fmt(data.stats.en_movimiento);
+      pintarMapa(data.unidades);
+      pintarTabla(data.unidades);
+      document.getElementById('estado').textContent =
+        'Actualizado ' + new Date().toLocaleTimeString('es-CO');
+    } catch (e) {
+      mostrarAviso('No se pudo conectar con el servidor: ' + e.message);
+      document.getElementById('estado').textContent = '';
+    }
+  }
+
+  iniciarMapa();
+  cargar();
+  setInterval(cargar, 60000);
+</script>
+{% endblock %}

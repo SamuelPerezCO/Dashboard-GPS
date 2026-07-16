@@ -1,0 +1,319 @@
+{% extends 'tracking/base.html' %}
+{% comment %}
+=============================================================================
+ DASHBOARD PRINCIPAL — hecho a partir del boceto en papel del usuario
+=============================================================================
+Estructura (rejilla de 2 columnas; cada gráfica tiene scroll horizontal
+propio para que quepan las placas de TODOS los vehículos en el eje X):
+Structure (2-column grid; each chart has its own horizontal scroll so the
+plates of ALL vehicles fit on the X axis):
+
+   Desde [fecha]  hasta [fecha]  [Consultar]
+   ┌─────────────────────────┬─────────────────────────┐
+   │ Total Servicios (línea) │ Total Timbradas (línea) │
+   ├─────────────────────────┼─────────────────────────┤
+   │ Ocupación Real (barras) │ Ocupación Total (tabla) │
+   ├─────────────────────────┴─────────────────────────┤
+   │ Detalle por día de las timbradas (tabla)          │
+   └───────────────────────────────────────────────────┘
+
+   (En pantallas angostas la rejilla vuelve a una sola columna.)
+   (On narrow screens the grid falls back to a single column.)
+
+Todas las gráficas tienen la placa del vehículo en el eje X.
+Cómo funciona:
+ 1. Al cargar (o al presionar "Consultar") el JS llama a
+    /api/dashboard/?desde=...&hasta=...
+ 2. Con el JSON recibido dibuja las 3 gráficas (SVG generado aquí mismo,
+    sin librerías) y llena las 2 tablas.
+ 3. La PRIMERA consulta es lenta (el servidor pregunta bus por bus al API
+    de rastreo); las siguientes salen del cache y son casi instantáneas.
+=============================================================================
+{% endcomment %}
+{% block title %}Dashboard — Rastreo Satelital{% endblock %}
+
+{% block head %}
+<style>
+  /* --- filtro de fechas (encabezado del boceto) --- */
+  .filtros { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filtros label { color: var(--text-secondary); font-size: 13px; }
+  .filtros input[type=date] {
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+    font: inherit;
+  }
+  .filtros button {
+    background: var(--series-1); color: #fff; border: none; border-radius: 6px;
+    padding: 7px 14px; font: inherit; font-weight: 550; cursor: pointer;
+  }
+  .filtros button:disabled { opacity: 0.6; cursor: wait; }
+
+  /* --- overlay de carga: spinner grande centrado sobre toda la página --- */
+  #overlay-carga {
+    display: none; position: fixed; inset: 0; z-index: 1500;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px; text-align: center; padding: 24px;
+    background: color-mix(in srgb, var(--page) 78%, transparent);
+    backdrop-filter: blur(2px);
+  }
+  #overlay-carga.visible { display: flex; }
+  #overlay-carga .spinner {
+    width: 76px; height: 76px; border-radius: 50%;
+    border: 7px solid var(--grid); border-top-color: var(--series-1);
+    animation: girar 0.9s linear infinite;
+  }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  #overlay-carga .msg { font-size: 15px; font-weight: 550; max-width: 460px; }
+  #overlay-carga .sub { color: var(--text-secondary); font-size: 13px; max-width: 460px; }
+
+  /* Rejilla de 2 columnas (Servicios|Timbradas, Ocupación Real|Ocupación
+     Total); el detalle por día queda solo, a lo ancho, debajo.
+     2-column grid (Servicios|Timbradas, Ocupación Real|Ocupación Total);
+     the day-by-day detail sits alone, full-width, below. */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-2 .card { margin-bottom: 0; min-width: 0; }  /* min-width:0 permite el scroll interno / min-width:0 enables the inner scroll */
+  @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* Si las placas de todos los vehículos no caben en la tarjeta, la
+     gráfica se puede desplazar horizontalmente.
+     If the plates of all the vehicles don't fit in the card, the chart
+     can be scrolled horizontally. */
+  .viz { overflow-x: auto; }
+
+  /* --- partes del SVG de las gráficas --- */
+  .viz .grid  { stroke: var(--grid); stroke-width: 1; }
+  .viz .base  { stroke: var(--baseline); stroke-width: 1; }
+  .viz .lbl   { fill: var(--text-muted); font-size: 10px; font-family: inherit; }
+  .viz .lin   { stroke: var(--series-1); stroke-width: 2; fill: none;
+                stroke-linejoin: round; stroke-linecap: round; }
+  .viz .pt    { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 1.5; }
+  .viz .bar   { fill: var(--series-1); }
+
+  /* la tabla del detalle puede ser muy ancha: números compactos */
+  #tabla-detalle td, #tabla-detalle th { padding: 6px 8px; font-size: 12px; white-space: nowrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Encabezado del boceto: Desde DD/MM/AAAA hasta DD/MM/AAAA -->
+<div class="filtros">
+  <label for="desde">Desde</label>
+  <input type="date" id="desde">
+  <label for="hasta">hasta</label>
+  <input type="date" id="hasta">
+  <button id="btn-consultar">Consultar</button>
+</div>
+
+<!-- Spinner grande que cubre la página mientras se consulta el API -->
+<div id="overlay-carga">
+  <div class="spinner"></div>
+  <div class="msg" id="overlay-msg">Consultando…</div>
+  <div class="sub" id="overlay-sub"></div>
+</div>
+
+<div class="grid-2">
+<div class="card">
+  <h2>Total Servicios</h2>
+  <p class="desc">Servicios por placa del vehículo (entradas a la geocerca de referencia en el rango).</p>
+  <div class="viz" id="chart-servicios"></div>
+</div>
+
+<div class="card">
+  <h2>Total Timbradas</h2>
+  <p class="desc">Timbradas por placa del vehículo en el rango.</p>
+  <div class="viz" id="chart-timbradas"></div>
+</div>
+
+<div class="card">
+  <h2>Ocupación Real</h2>
+  <p class="desc">Pasajeros únicos por placa del vehículo en el rango.</p>
+  <div class="viz" id="chart-ocupacion"></div>
+</div>
+
+<div class="card">
+  <h2>Ocupación Total</h2>
+  <p class="desc" id="desc-ocupacion-total">Pasajeros únicos de hoy y del mes en curso.</p>
+  <div class="scroll-x" style="max-height:290px; overflow-y:auto;">
+    <table id="tabla-ocupacion">
+      <thead>
+        <tr><th>Placa vehículo</th><th class="num">Total día</th><th class="num">Total mes</th></tr>
+      </thead>
+      <tbody><tr><td colspan="3" class="muted">Sin datos todavía.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+</div><!-- /grid-2 -->
+
+<div class="card">
+  <h2>Detalle por día de las timbradas</h2>
+  <p class="desc">Timbradas de cada vehículo, día por día del rango consultado.</p>
+  <div class="scroll-x">
+    <table id="tabla-detalle">
+      <thead></thead>
+      <tbody><tr><td class="muted">Sin datos todavía.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const inputDesde = document.getElementById('desde');
+  const inputHasta = document.getElementById('hasta');
+  const btn = document.getElementById('btn-consultar');
+  let datos = null;   // última respuesta del servidor (para repintar al cambiar tamaño)
+
+  // Rango inicial: últimos 7 días (incluyendo hoy).
+  const hoyLocal = new Date();
+  const hace6 = new Date(hoyLocal); hace6.setDate(hoyLocal.getDate() - 6);
+  inputHasta.value = hoyLocal.toLocaleDateString('sv-SE');   // 'sv-SE' da YYYY-MM-DD
+  inputDesde.value = hace6.toLocaleDateString('sv-SE');
+
+  const ddmmaaaa = (f) => f.split('-').reverse().join('/');  // 2026-07-15 -> 15/07/2026
+
+  /*
+   * Dibuja una gráfica SVG dentro de "cont".
+   *  - labels: textos del eje X (las placas)
+   *  - values: un número por etiqueta
+   *  - tipo:   'linea' (Servicios y Timbradas, como el boceto) o 'barras'
+   *            (Ocupación Real).
+   * Sin librerías: se arma el SVG como texto y se le agregan zonas
+   * invisibles de hover para el tooltip.
+   */
+  function pintarGrafica(cont, labels, values, tipo, nombreSerie) {
+    const n = labels.length;
+    if (!n) { cont.innerHTML = '<p class="muted">Sin vehículos.</p>'; return; }
+    // Cada vehículo tiene garantizado un ancho mínimo para que SU placa
+    // siempre se dibuje; si no caben en la tarjeta, aparece scroll horizontal.
+    const ANCHO_MIN_POR_BUS = 30;
+    const pl = 38, pr = 12, pt = 10, pb = 74;
+    const H = 320;
+    const W = Math.max(cont.clientWidth, 320, n * ANCHO_MIN_POR_BUS + pl + pr);
+    const iw = W - pl - pr, ih = H - pt - pb;
+    const max = Math.max(1, ...values);
+    const slot = iw / n;
+    const xLinea = i => pl + (n === 1 ? iw / 2 : i * iw / (n - 1));
+    const xBarra = i => pl + i * slot;
+    const y = v => pt + ih * (1 - v / max);
+
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${nombreSerie} por placa">`;
+    // rejilla horizontal: 0, mitad y máximo
+    for (const t of [0, Math.round(max / 2), max]) {
+      s += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${y(t)}" y2="${y(t)}"/>`;
+      s += `<text class="lbl" x="${pl - 6}" y="${y(t) + 3}" text-anchor="end">${fmt(t)}</text>`;
+    }
+    s += `<line class="base" x1="${pl}" x2="${W - pr}" y1="${y(0)}" y2="${y(0)}"/>`;
+    // etiquetas del eje X: TODAS las placas (rotadas para que no se encimen)
+    labels.forEach((lb, i) => {
+      const cx = (tipo === 'barras') ? xBarra(i) + slot / 2 : xLinea(i);
+      s += `<text class="lbl" transform="rotate(-45 ${cx} ${H - pb + 16})" x="${cx}" y="${H - pb + 16}" text-anchor="end">${lb}</text>`;
+    });
+
+    if (tipo === 'linea') {
+      s += `<polyline class="lin" points="${values.map((v, i) => `${xLinea(i)},${y(v)}`).join(' ')}"/>`;
+      values.forEach((v, i) => { s += `<circle class="pt" cx="${xLinea(i)}" cy="${y(v)}" r="3.5"/>`; });
+      values.forEach((v, i) => {
+        s += `<rect class="hover" data-i="${i}" x="${xLinea(i) - slot / 2}" y="${pt}" width="${slot}" height="${ih}" fill="transparent"/>`;
+      });
+    } else {
+      values.forEach((v, i) => {
+        const bh = v > 0 ? Math.max(ih * v / max, 2) : 0;
+        s += `<rect class="bar" x="${xBarra(i) + 1}" y="${y(0) - bh}" width="${Math.max(slot - 2, 1.5)}" height="${bh}" rx="2"/>`;
+        s += `<rect class="hover" data-i="${i}" x="${xBarra(i)}" y="${pt}" width="${slot}" height="${ih}" fill="transparent"/>`;
+      });
+    }
+    s += '</svg>';
+    cont.innerHTML = s;
+
+    cont.querySelectorAll('.hover').forEach(r => {
+      const i = +r.dataset.i;
+      r.addEventListener('mouseenter', ev => tooltipShow(
+        `<div class="t-title">${labels[i]}</div>
+         <div class="t-row">${nombreSerie}: <b>${fmt(values[i])}</b></div>`, ev));
+      r.addEventListener('mousemove', tooltipMove);
+      r.addEventListener('mouseleave', tooltipHide);
+    });
+  }
+
+  function pintarTodo() {
+    if (!datos) return;
+    const placas = datos.vehiculos.map(v => v.placa);
+    pintarGrafica(document.getElementById('chart-servicios'), placas,
+                  datos.vehiculos.map(v => v.servicios), 'linea', 'Servicios');
+    pintarGrafica(document.getElementById('chart-timbradas'), placas,
+                  datos.vehiculos.map(v => v.timbradas), 'linea', 'Timbradas');
+    pintarGrafica(document.getElementById('chart-ocupacion'), placas,
+                  datos.vehiculos.map(v => v.ocupacion), 'barras', 'Ocupación');
+
+    // Tabla Ocupación Total (día = hoy, mes = mes en curso)
+    document.getElementById('desc-ocupacion-total').textContent =
+      `Pasajeros únicos de hoy (${ddmmaaaa(datos.hoy)}) y del mes ${datos.mes}.`;
+    document.querySelector('#tabla-ocupacion tbody').innerHTML =
+      datos.ocupacion_total.map(o => `
+        <tr>
+          <td><b>${o.placa}</b></td>
+          <td class="num">${fmt(o.dia)}</td>
+          <td class="num">${fmt(o.mes)}</td>
+        </tr>`).join('');
+
+    // Tabla Detalle por día: filas = fechas, columnas = placas
+    document.querySelector('#tabla-detalle thead').innerHTML =
+      '<tr><th>Fecha</th>' + datos.detalle.placas.map(p => `<th class="num">${p}</th>`).join('') + '</tr>';
+    document.querySelector('#tabla-detalle tbody').innerHTML =
+      datos.detalle.filas.map(f => `
+        <tr>
+          <td><b>${ddmmaaaa(f.fecha)}</b></td>
+          ${f.valores.map(v => `<td class="num${v ? '' : ' muted'}">${fmt(v)}</td>`).join('')}
+        </tr>`).join('');
+  }
+
+  // A partir de un mes de rango el mensaje del spinner explica por qué la
+  // consulta puede tardar: son muchas peticiones al API (una getAlerts por
+  // día + eventos bus por bus) y el API exige 30 s entre peticiones.
+  const DIAS_AVISO = 31;
+  const overlay = document.getElementById('overlay-carga');
+  const overlayMsg = document.getElementById('overlay-msg');
+  const overlaySub = document.getElementById('overlay-sub');
+
+  function diasDelRango() {
+    const d1 = new Date(inputDesde.value), d2 = new Date(inputHasta.value);
+    return Math.abs(Math.round((d2 - d1) / 86400000)) + 1;
+  }
+
+  async function cargar() {
+    const dias = diasDelRango();
+    btn.disabled = true;
+    overlayMsg.textContent = `Consultando ${dias} ${dias === 1 ? 'día' : 'días'} de información…`;
+    overlaySub.textContent = dias > DIAS_AVISO
+      ? 'Elegiste un rango de más de un mes: el API de rastreo exige 30 segundos ' +
+        'entre peticiones y se consulta bus por bus y día por día, así que la ' +
+        'primera vez puede tardar varios minutos. Las siguientes consultas del ' +
+        'mismo rango salen del cache y son casi instantáneas.'
+      : 'La primera consulta va bus por bus al API de rastreo y puede tardar ' +
+        'un poco; las siguientes salen del cache y son casi instantáneas.';
+    overlay.classList.add('visible');
+    try {
+      const url = '{% url "tracking:api_dashboard" %}' +
+        '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (data.error) { mostrarAviso(data.error); return; }
+      ocultarAviso();
+      datos = data;
+      pintarTodo();
+      document.getElementById('estado').textContent =
+        ddmmaaaa(data.desde) + ' – ' + ddmmaaaa(data.hasta) +
+        ' · actualizado ' + new Date().toLocaleTimeString('es-CO');
+    } catch (e) {
+      mostrarAviso('No se pudo conectar con el servidor: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      overlay.classList.remove('visible');
+    }
+  }
+
+  btn.addEventListener('click', cargar);
+  window.addEventListener('resize', pintarTodo);   // repintar al cambiar tamaño
+  cargar();
+</script>
+{% endblock %}
