@@ -1,0 +1,6 @@
+# Dependencias del proyecto Dashboard GPS.
+# Instalar con: pip install -r requirements.txt
+
+Django==6.0.7            # framework web (vistas, plantillas, cache)
+requests==2.34.2         # peticiones HTTP al WebService de Service24GPS
+python-dotenv==1.2.2     # carga las credenciales del archivo .env
