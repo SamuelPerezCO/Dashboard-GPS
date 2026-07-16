@@ -37,24 +37,46 @@ FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 # --- Vistas de página (solo HTML) -----------------------------------------
 
 def dashboard(request):
-    """Página principal: el dashboard del boceto (rango de fechas)."""
+    """Página principal: el dashboard del boceto (rango de fechas).
+
+    Args:
+        request (HttpRequest): La petición HTTP entrante.
+
+    Returns:
+        HttpResponse: El HTML de dashboard.html, sin datos (el JavaScript
+            los pide después vía /api/dashboard/).
+    """
     return render(request, 'tracking/dashboard.html')
 
 
 def fleet_dashboard(request):
-    """Vista de mapa de la flota. Guardada en /mapa/ (sin enlace en el menú)."""
+    """Vista de mapa de la flota. Guardada en /mapa/ (sin enlace en el menú).
+
+    Args:
+        request (HttpRequest): La petición HTTP entrante.
+
+    Returns:
+        HttpResponse: El HTML de fleet.html, sin datos (el JavaScript
+            los pide después vía /api/fleet/).
+    """
     return render(request, 'tracking/fleet.html')
 
 
 # --- Vistas de API interno (JSON) ------------------------------------------
 
 def _json_api(build):
-    """
-    Envuelve cualquier consulta en manejo de errores uniforme.
+    """Envuelve cualquier consulta en manejo de errores uniforme.
 
-    "build" es una función sin argumentos que produce el diccionario de datos.
     Si algo falla, en lugar de romper la página se regresa {"error": "..."}
     con un código HTTP apropiado, y el JavaScript lo muestra como aviso rojo.
+
+    Args:
+        build (Callable[[], dict]): Función sin argumentos que produce el
+            diccionario de datos a serializar como JSON.
+
+    Returns:
+        JsonResponse: Los datos en JSON si todo sale bien, o
+            {"error": "..."} con estado 400, 502 o 503 según el tipo de falla.
     """
     try:
         return JsonResponse(build())
@@ -78,9 +100,17 @@ def _json_api(build):
 
 
 def api_dashboard(request):
-    """
-    JSON del dashboard principal. Acepta ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
-    (sin parámetros = hoy).
+    """JSON del dashboard principal.
+
+    Acepta ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD (sin parámetros = hoy).
+
+    Args:
+        request (HttpRequest): La petición HTTP. Puede traer los parámetros
+            GET "desde" y "hasta" en formato YYYY-MM-DD.
+
+    Returns:
+        JsonResponse: El resumen del rango de fechas, o {"error": "..."}
+            con estado 400 si alguna fecha viene mal formada.
     """
     desde = request.GET.get('desde') or None
     hasta = request.GET.get('hasta') or None
@@ -91,5 +121,13 @@ def api_dashboard(request):
 
 
 def api_fleet(request):
-    """JSON con la flota completa. Lo usa la vista de mapa (/mapa/)."""
+    """JSON con la flota completa. Lo usa la vista de mapa (/mapa/).
+
+    Args:
+        request (HttpRequest): La petición HTTP entrante (sin parámetros).
+
+    Returns:
+        JsonResponse: La flota completa con la posición actual de cada
+            vehículo, o {"error": "..."} si el WebService falla.
+    """
     return _json_api(services.fleet_summary)
