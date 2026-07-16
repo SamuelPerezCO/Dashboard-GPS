@@ -35,7 +35,7 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'dashboardgps.qd.je']
 
 # --- Credenciales del WebService Service24GPS (se llenan en el .env) ---
 # os.getenv lee cada variable del entorno; el segundo argumento es el valor
