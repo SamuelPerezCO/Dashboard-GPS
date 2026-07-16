@@ -35,7 +35,17 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'dashboardgps.qd.je']
+ALLOWED_HOSTS = [
+    'localhost', '127.0.0.1',   # desarrollo local
+    'dashboardgps.qd.je',       # dominio propio
+    '.onrender.com',            # URL que asigna Render (xxxx.onrender.com)
+]
+
+# Orígenes HTTPS en los que Django acepta formularios POST (login del /admin/).
+CSRF_TRUSTED_ORIGINS = [
+    'https://dashboardgps.qd.je',
+    'https://*.onrender.com',
+]
 
 # --- Credenciales del WebService Service24GPS (se llenan en el .env) ---
 # os.getenv lee cada variable del entorno; el segundo argumento es el valor
@@ -60,6 +70,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # WhiteNoise sirve los archivos estáticos (CSS/JS) en producción,
+    # porque gunicorn solo ejecuta Python y no entrega archivos.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -134,3 +147,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Carpeta donde "collectstatic" junta todos los estáticos para producción.
+# Render la genera durante el build; no se sube a git.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
