@@ -10,22 +10,40 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Lee el archivo .env (que está junto a manage.py) y carga sus variables
+# al entorno. Así las credenciales NUNCA quedan escritas en el código.
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-gl@g$s$vi%6-=s1j*ll81mwz%(hl38&e9v0oeg8u5m9380k2^+'
+SECRET_KEY = os.getenv(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-_gi)k=)ux!i+)b1ls$7-$itgk$p9)b#lgbty^exf*m_q2$&4qx',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+
+# --- Credenciales del WebService Service24GPS (se llenan en el .env) ---
+# os.getenv lee cada variable del entorno; el segundo argumento es el valor
+# por defecto si no existe. tracking/api_client.py usa estas 4 constantes.
+GPS_API_BASE_URL = os.getenv('GPS_API_BASE_URL', 'https://api.service24gps.com/api/v1')
+GPS_APIKEY = os.getenv('GPS_APIKEY', '')
+GPS_USERNAME = os.getenv('GPS_USERNAME', '')
+GPS_PASSWORD = os.getenv('GPS_PASSWORD', '')
 
 
 # Application definition
@@ -37,6 +55,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'tracking',
 ]
 
 MIDDLEWARE = [
@@ -102,9 +121,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'es-mx'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/Mexico_City'
 
 USE_I18N = True
 
