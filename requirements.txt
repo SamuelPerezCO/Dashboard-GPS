@@ -4,3 +4,5 @@
 Django==6.0.7            # framework web (vistas, plantillas, cache)
 requests==2.34.2         # peticiones HTTP al WebService de Service24GPS
 python-dotenv==1.2.2     # carga las credenciales del archivo .env
+gunicorn==26.0.0         # servidor web de producción (lo usa Render)
+whitenoise==6.12.0       # sirve los archivos estáticos (CSS del admin, etc.)
