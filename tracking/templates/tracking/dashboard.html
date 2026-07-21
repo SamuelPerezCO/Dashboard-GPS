@@ -4,7 +4,7 @@
  DASHBOARD PRINCIPAL — hecho a partir del boceto en papel del usuario
 =============================================================================
 Estructura (rejilla de 2 columnas; cada gráfica tiene scroll horizontal
-propio para que quepan las placas de TODOS los vehículos en el eje X):
+propio para que quepan los internos de TODOS los vehículos en el eje X):
 Structure (2-column grid; each chart has its own horizontal scroll so the
 plates of ALL vehicles fit on the X axis):
 
@@ -20,7 +20,7 @@ plates of ALL vehicles fit on the X axis):
    (En pantallas angostas la rejilla vuelve a una sola columna.)
    (On narrow screens the grid falls back to a single column.)
 
-Todas las gráficas tienen la placa del vehículo en el eje X.
+Todas las gráficas tienen el número interno del vehículo en el eje X.
 Cómo funciona:
  1. Al cargar (o al presionar "Consultar") el JS llama a
     /api/dashboard/?desde=...&hasta=...
@@ -74,7 +74,7 @@ Cómo funciona:
   .grid-2 .card { margin-bottom: 0; min-width: 0; }  /* min-width:0 permite el scroll interno / min-width:0 enables the inner scroll */
   @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
 
-  /* Si las placas de todos los vehículos no caben en la tarjeta, la
+  /* Si los internos de todos los vehículos no caben en la tarjeta, la
      gráfica se puede desplazar horizontalmente.
      If the plates of all the vehicles don't fit in the card, the chart
      can be scrolled horizontally. */
@@ -114,19 +114,19 @@ Cómo funciona:
 <div class="grid-2">
 <div class="card">
   <h2>Total Servicios</h2>
-  <p class="desc">Servicios por placa del vehículo (entradas a la geocerca de referencia en el rango).</p>
+  <p class="desc">Servicios por número interno del vehículo (entradas a la geocerca de referencia en el rango).</p>
   <div class="viz" id="chart-servicios"></div>
 </div>
 
 <div class="card">
   <h2>Total Timbradas</h2>
-  <p class="desc">Timbradas por placa del vehículo en el rango.</p>
+  <p class="desc">Timbradas por número interno del vehículo en el rango.</p>
   <div class="viz" id="chart-timbradas"></div>
 </div>
 
 <div class="card">
   <h2>Ocupación Real</h2>
-  <p class="desc">Pasajeros únicos por placa del vehículo en el rango.</p>
+  <p class="desc">Pasajeros únicos por número interno del vehículo en el rango.</p>
   <div class="viz" id="chart-ocupacion"></div>
 </div>
 
@@ -136,7 +136,7 @@ Cómo funciona:
   <div class="scroll-x" style="max-height:290px; overflow-y:auto;">
     <table id="tabla-ocupacion">
       <thead>
-        <tr><th>Placa vehículo</th><th class="num">Total día</th><th class="num">Total mes</th></tr>
+        <tr><th>Interno</th><th class="num">Total día</th><th class="num">Total mes</th></tr>
       </thead>
       <tbody><tr><td colspan="3" class="muted">Sin datos todavía.</td></tr></tbody>
     </table>
@@ -173,7 +173,7 @@ Cómo funciona:
 
   /*
    * Dibuja una gráfica SVG dentro de "cont".
-   *  - labels: textos del eje X (las placas)
+   *  - labels: textos del eje X (los internos)
    *  - values: un número por etiqueta
    *  - tipo:   'linea' (Servicios y Timbradas, como el boceto) o 'barras'
    *            (Ocupación Real).
@@ -183,7 +183,7 @@ Cómo funciona:
   function pintarGrafica(cont, labels, values, tipo, nombreSerie) {
     const n = labels.length;
     if (!n) { cont.innerHTML = '<p class="muted">Sin vehículos.</p>'; return; }
-    // Cada vehículo tiene garantizado un ancho mínimo para que SU placa
+    // Cada vehículo tiene garantizado un ancho mínimo para que SU interno
     // siempre se dibuje; si no caben en la tarjeta, aparece scroll horizontal.
     const ANCHO_MIN_POR_BUS = 30;
     const pl = 38, pr = 12, pt = 10, pb = 74;
@@ -196,14 +196,14 @@ Cómo funciona:
     const xBarra = i => pl + i * slot;
     const y = v => pt + ih * (1 - v / max);
 
-    let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${nombreSerie} por placa">`;
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${nombreSerie} por interno">`;
     // rejilla horizontal: 0, mitad y máximo
     for (const t of [0, Math.round(max / 2), max]) {
       s += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${y(t)}" y2="${y(t)}"/>`;
       s += `<text class="lbl" x="${pl - 6}" y="${y(t) + 3}" text-anchor="end">${fmt(t)}</text>`;
     }
     s += `<line class="base" x1="${pl}" x2="${W - pr}" y1="${y(0)}" y2="${y(0)}"/>`;
-    // etiquetas del eje X: TODAS las placas (rotadas para que no se encimen)
+    // etiquetas del eje X: TODOS los internos (rotados para que no se encimen)
     labels.forEach((lb, i) => {
       const cx = (tipo === 'barras') ? xBarra(i) + slot / 2 : xLinea(i);
       s += `<text class="lbl" transform="rotate(-45 ${cx} ${H - pb + 16})" x="${cx}" y="${H - pb + 16}" text-anchor="end">${lb}</text>`;
@@ -237,12 +237,12 @@ Cómo funciona:
 
   function pintarTodo() {
     if (!datos) return;
-    const placas = datos.vehiculos.map(v => v.placa);
-    pintarGrafica(document.getElementById('chart-servicios'), placas,
+    const internos = datos.vehiculos.map(v => v.interno);
+    pintarGrafica(document.getElementById('chart-servicios'), internos,
                   datos.vehiculos.map(v => v.servicios), 'linea', 'Servicios');
-    pintarGrafica(document.getElementById('chart-timbradas'), placas,
+    pintarGrafica(document.getElementById('chart-timbradas'), internos,
                   datos.vehiculos.map(v => v.timbradas), 'linea', 'Timbradas');
-    pintarGrafica(document.getElementById('chart-ocupacion'), placas,
+    pintarGrafica(document.getElementById('chart-ocupacion'), internos,
                   datos.vehiculos.map(v => v.ocupacion), 'barras', 'Ocupación');
 
     // Tabla Ocupación Total (día = hoy, mes = mes en curso)
@@ -251,14 +251,14 @@ Cómo funciona:
     document.querySelector('#tabla-ocupacion tbody').innerHTML =
       datos.ocupacion_total.map(o => `
         <tr>
-          <td><b>${o.placa}</b></td>
+          <td><b>${o.interno}</b></td>
           <td class="num">${fmt(o.dia)}</td>
           <td class="num">${fmt(o.mes)}</td>
         </tr>`).join('');
 
-    // Tabla Detalle por día: filas = fechas, columnas = placas
+    // Tabla Detalle por día: filas = fechas, columnas = internos
     document.querySelector('#tabla-detalle thead').innerHTML =
-      '<tr><th>Fecha</th>' + datos.detalle.placas.map(p => `<th class="num">${p}</th>`).join('') + '</tr>';
+      '<tr><th>Fecha</th>' + datos.detalle.internos.map(p => `<th class="num">${p}</th>`).join('') + '</tr>';
     document.querySelector('#tabla-detalle tbody').innerHTML =
       datos.detalle.filas.map(f => `
         <tr>

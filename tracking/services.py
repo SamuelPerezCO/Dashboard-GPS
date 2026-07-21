@@ -193,10 +193,12 @@ def range_summary(desde=None, hasta=None):
 
     vehiculos = []            # filas para las 3 gráficas
     ocupacion_total = []      # filas para la tabla Ocupación Total
-    conteo_dia_placa = Counter()   # {(fecha, placa): timbradas} para el detalle
+    conteo_dia_interno = Counter()  # {(fecha, interno): timbradas} para el detalle
     for veh in vehicles:
         equipo = veh.get('idgps')
-        placa = veh.get('patente') or veh.get('nombre') or ''
+        # Identificamos cada vehículo por su NÚMERO INTERNO (campo "nombre",
+        # p. ej. "INT 7074"), no por la placa (campo "patente").
+        interno = veh.get('nombre') or veh.get('patente') or ''
 
         # Eventos del mes en curso (1 petición por bus, cache 30 min).
         ev_mes = []
@@ -223,8 +225,7 @@ def range_summary(desde=None, hasta=None):
         # Acumulados del rango (gráficas).
         pasajeros_rango = {e['pasajero'] for e in ev_rango if e['pasajero']}
         vehiculos.append({
-            'bus': veh.get('nombre'),
-            'placa': placa,
+            'interno': interno,
             'equipo': equipo,
             'servicios': servicios.get(str(equipo), 0),
             'timbradas': len(ev_rango),
@@ -233,8 +234,7 @@ def range_summary(desde=None, hasta=None):
 
         # Tabla Ocupación Total: pasajeros únicos de HOY y del MES en curso.
         ocupacion_total.append({
-            'placa': placa,
-            'bus': veh.get('nombre'),
+            'interno': interno,
             'dia': len({e['pasajero'] for e in ev_mes
                         if e['pasajero'] and e['fecha'] == hoy}),
             'mes': len({e['pasajero'] for e in ev_mes if e['pasajero']}),
@@ -242,11 +242,11 @@ def range_summary(desde=None, hasta=None):
 
         # Matriz del detalle por día.
         for e in ev_rango:
-            conteo_dia_placa[(e['fecha'], placa)] += 1
+            conteo_dia_interno[(e['fecha'], interno)] += 1
 
-    vehiculos.sort(key=lambda v: v['bus'] or '')
-    ocupacion_total.sort(key=lambda v: v['bus'] or '')
-    placas = [v['placa'] for v in vehiculos]
+    vehiculos.sort(key=lambda v: v['interno'] or '')
+    ocupacion_total.sort(key=lambda v: v['interno'] or '')
+    internos = [v['interno'] for v in vehiculos]
     return {
         'desde': desde,
         'hasta': hasta,
@@ -255,9 +255,9 @@ def range_summary(desde=None, hasta=None):
         'vehiculos': vehiculos,
         'ocupacion_total': ocupacion_total,
         'detalle': {
-            'placas': placas,
+            'internos': internos,
             'filas': [{'fecha': d,
-                       'valores': [conteo_dia_placa.get((d, p), 0) for p in placas]}
+                       'valores': [conteo_dia_interno.get((d, p), 0) for p in internos]}
                       for d in dias],
         },
     }
