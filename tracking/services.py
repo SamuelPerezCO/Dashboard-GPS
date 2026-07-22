@@ -7,9 +7,9 @@ cuenta y resume para dejarlos listos tal como los pinta la página.
 
 Hay una función por dashboard:
 
-  - range_summary()  -> el dashboard principal (Servicios, Timbradas y
-                        detalle por día, todo filtrado por un rango de
-                        fechas desde/hasta).
+  - range_summary()  -> el dashboard principal (Servicios, Timbradas,
+                        % de Ocupación y detalle por día, todo filtrado por
+                        un rango de fechas desde/hasta).
   - fleet_summary()  -> la vista de mapa (guardada en /mapa/, sin enlace
                         en el menú por ahora).
 
@@ -26,6 +26,31 @@ from . import api_client
 def _hoy():
     """Fecha de hoy como texto 'YYYY-MM-DD' (la zona horaria viene de settings)."""
     return datetime.now().strftime('%Y-%m-%d')
+
+
+def _norm_interno(interno):
+    """
+    Normaliza el número interno para poder emparejarlo sin importar los
+    espacios ('INT 7074', 'int7074' -> 'INT7074').
+    """
+    return ''.join((interno or '').upper().split())
+
+
+# Capacidad (número de asientos) de cada bus, por número interno. El API de
+# rastreo NO entrega este dato, así que la flota lo mantiene aquí a mano. Se
+# usa para el % de ocupación por vehículo (timbradas ÷ capacidad × 100).
+_CAPACIDAD_CRUDA = {
+    'INT 7074': 25, 'INT 7075': 25, 'INT 7076': 31, 'INT 7077': 37,
+    'INT 7078': 37, 'INT 7079': 37, 'INT 7080': 37, 'INT 7088': 30,
+    'INT 7091': 30, 'INT 7092': 30, 'INT 7093': 30, 'INT 7094': 30,
+    'INT 7095': 30, 'INT 7097': 30, 'INT 7099': 30, 'INT 7202': 30,
+    'INT 7203': 30, 'INT 7204': 30, 'INT 7227': 40, 'INT 7239': 40,
+    'INT 7245': 40, 'INT 7248': 40, 'INT 7250': 40, 'INT 7269': 40,
+    'INT 7273': 40, 'INT 7274': 40, 'INT 7275': 40, 'INT 7276': 40,
+    'INT 7277': 40, 'INT 7278': 40,
+}
+# Búsqueda por interno normalizado (así 'INT 7074' e 'INT7074' encuentran lo mismo).
+CAPACIDAD_POR_INTERNO = {_norm_interno(k): v for k, v in _CAPACIDAD_CRUDA.items()}
 
 
 def fleet_summary():
@@ -145,8 +170,9 @@ def range_summary(desde=None, hasta=None):
     Dashboard principal: todo filtrado por un rango de fechas desde/hasta.
 
     Regresa lo que pide el boceto del dashboard:
-      - vehiculos:  por cada bus, Servicios / Timbradas acumulados en el
-                    rango (alimenta las 2 gráficas).
+      - vehiculos:  por cada bus, Servicios / Timbradas y el % de Ocupación
+                    acumulados en el rango (alimenta las 3 gráficas). Cada
+                    fila trae también su capacidad de asientos.
       - detalle:    matriz de timbradas por día x bus (la tabla
                     "Detalle por día de las timbradas").
 
@@ -154,6 +180,9 @@ def range_summary(desde=None, hasta=None):
       - Timbradas = eventos "PASAJERO IDENTIFICADO" (id 2720).
       - Servicios = entradas del bus a las geocercas de referencia
                     (alertas de geocerca, ver _es_entrada_geocerca).
+      - Ocupación = % de ocupación por vehículo = timbradas ÷ capacidad × 100
+                    (capacidad = asientos del bus, ver CAPACIDAD_POR_INTERNO).
+                    Es None si no se conoce la capacidad del bus.
 
     Estrategia para no saturar el API (mínimo 30 s entre peticiones):
       * Eventos: si el rango cae dentro del mes en curso, UNA petición por
@@ -217,11 +246,16 @@ def range_summary(desde=None, hasta=None):
             except api_client.ApiError:
                 ev_rango = []
 
+        # % de ocupación = timbradas ÷ capacidad × 100 (None si no hay capacidad).
+        timbradas = len(ev_rango)
+        capacidad = CAPACIDAD_POR_INTERNO.get(_norm_interno(interno))
         vehiculos.append({
             'interno': interno,
             'equipo': equipo,
             'servicios': servicios.get(str(equipo), 0),
-            'timbradas': len(ev_rango),
+            'timbradas': timbradas,
+            'capacidad': capacidad,
+            'ocupacion': round(timbradas / capacidad * 100) if capacidad else None,
         })
 
         # Matriz del detalle por día.

@@ -12,6 +12,8 @@ plates of ALL vehicles fit on the X axis):
    ┌─────────────────────────┬─────────────────────────┐
    │ Total Servicios (línea) │ Total Timbradas (línea) │
    ├─────────────────────────┴─────────────────────────┤
+   │ Ocupación por vehículo (barras, %)                │
+   ├───────────────────────────────────────────────────┤
    │ Detalle por día de las timbradas (tabla)          │
    └───────────────────────────────────────────────────┘
 
@@ -22,7 +24,7 @@ Todas las gráficas tienen el número interno del vehículo en el eje X.
 Cómo funciona:
  1. Al cargar (o al presionar "Consultar") el JS llama a
     /api/dashboard/?desde=...&hasta=...
- 2. Con el JSON recibido dibuja las 2 gráficas (SVG generado aquí mismo,
+ 2. Con el JSON recibido dibuja las 3 gráficas (SVG generado aquí mismo,
     sin librerías) y llena la tabla de detalle.
  3. La PRIMERA consulta es lenta (el servidor pregunta bus por bus al API
     de rastreo); las siguientes salen del cache y son casi instantáneas.
@@ -124,6 +126,12 @@ Cómo funciona:
 </div><!-- /grid-2 -->
 
 <div class="card">
+  <h2>Ocupación por vehículo</h2>
+  <p class="desc">Porcentaje de ocupación por número interno del vehículo (timbradas ÷ capacidad × 100) en el rango. Solo se muestran los vehículos con capacidad registrada.</p>
+  <div class="viz" id="chart-ocupacion"></div>
+</div>
+
+<div class="card">
   <h2>Detalle por día de las timbradas</h2>
   <p class="desc">Timbradas de cada vehículo, día por día del rango consultado.</p>
   <div class="scroll-x">
@@ -158,7 +166,7 @@ Cómo funciona:
    * Sin librerías: se arma el SVG como texto y se le agregan zonas
    * invisibles de hover para el tooltip.
    */
-  function pintarGrafica(cont, labels, values, tipo, nombreSerie) {
+  function pintarGrafica(cont, labels, values, tipo, nombreSerie, unidad = '') {
     const n = labels.length;
     if (!n) { cont.innerHTML = '<p class="muted">Sin vehículos.</p>'; return; }
     // Cada vehículo tiene garantizado un ancho mínimo para que SU interno
@@ -178,7 +186,7 @@ Cómo funciona:
     // rejilla horizontal: 0, mitad y máximo
     for (const t of [0, Math.round(max / 2), max]) {
       s += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${y(t)}" y2="${y(t)}"/>`;
-      s += `<text class="lbl" x="${pl - 6}" y="${y(t) + 3}" text-anchor="end">${fmt(t)}</text>`;
+      s += `<text class="lbl" x="${pl - 6}" y="${y(t) + 3}" text-anchor="end">${fmt(t)}${unidad}</text>`;
     }
     s += `<line class="base" x1="${pl}" x2="${W - pr}" y1="${y(0)}" y2="${y(0)}"/>`;
     // etiquetas del eje X: TODOS los internos (rotados para que no se encimen)
@@ -207,7 +215,7 @@ Cómo funciona:
       const i = +r.dataset.i;
       r.addEventListener('mouseenter', ev => tooltipShow(
         `<div class="t-title">${labels[i]}</div>
-         <div class="t-row">${nombreSerie}: <b>${fmt(values[i])}</b></div>`, ev));
+         <div class="t-row">${nombreSerie}: <b>${fmt(values[i])}${unidad}</b></div>`, ev));
       r.addEventListener('mousemove', tooltipMove);
       r.addEventListener('mouseleave', tooltipHide);
     });
@@ -220,6 +228,14 @@ Cómo funciona:
                   datos.vehiculos.map(v => v.servicios), 'linea', 'Servicios');
     pintarGrafica(document.getElementById('chart-timbradas'), internos,
                   datos.vehiculos.map(v => v.timbradas), 'linea', 'Timbradas');
+
+    // Ocupación por vehículo (%) = timbradas ÷ capacidad × 100.
+    // Solo los buses con capacidad registrada (v.ocupacion != null); el eje X
+    // lleva únicamente el número interno (INT 7076, ...).
+    const conCap = datos.vehiculos.filter(v => v.ocupacion != null);
+    pintarGrafica(document.getElementById('chart-ocupacion'),
+                  conCap.map(v => v.interno),
+                  conCap.map(v => v.ocupacion), 'barras', 'Ocupación', '%');
 
     // Tabla Detalle por día: filas = fechas, columnas = internos
     document.querySelector('#tabla-detalle thead').innerHTML =
