@@ -8,6 +8,7 @@ propio para que quepan los internos de TODOS los vehículos en el eje X):
 Structure (2-column grid; each chart has its own horizontal scroll so the
 plates of ALL vehicles fit on the X axis):
 
+   [Todas] [PROCAPS] [DITAR] [RELIANZ]      <- pestañas por empresa
    Desde [fecha]  hasta [fecha]  [Consultar]
    ┌─────────────────────────┬─────────────────────────┐
    │ Total Servicios (línea) │ Total Timbradas (línea) │
@@ -16,6 +17,10 @@ plates of ALL vehicles fit on the X axis):
    ├───────────────────────────────────────────────────┤
    │ Detalle por día de las timbradas (tabla)          │
    └───────────────────────────────────────────────────┘
+
+Cada servicio pertenece a una empresa distinta (PROCAPS, DITAR, RELIANZ) y se
+reconoce por el nombre de la geocerca en la que entra el bus. Las pestañas de
+arriba recalculan TODO el dashboard para una sola empresa.
 
    (En pantallas angostas la rejilla vuelve a una sola columna.)
    (On narrow screens the grid falls back to a single column.)
@@ -34,6 +39,29 @@ Cómo funciona:
 
 {% block head %}
 <style>
+  /* --- pestañas de empresa (Todas / PROCAPS / DITAR / RELIANZ) --- */
+  .tabs {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border); margin-bottom: 16px;
+  }
+  .tabs button {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--text-secondary); font: inherit; font-weight: 550;
+    padding: 8px 14px; margin-bottom: -1px; cursor: pointer; border-radius: 6px 6px 0 0;
+  }
+  .tabs button:hover { background: var(--grid); }
+  .tabs button.activa { color: var(--text-primary); border-bottom-color: var(--series-1); }
+  .tabs button:disabled { opacity: 0.6; cursor: wait; }
+
+  /* Aviso ámbar dentro de una pestaña sin datos (geocerca aún no creada). */
+  .nota-vacia {
+    background: var(--surface-1); border: 1px solid var(--baseline);
+    border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;
+    color: var(--text-secondary); font-size: 13px; display: none;
+  }
+  .nota-vacia.visible { display: block; }
+  .nota-vacia b { color: var(--text-primary); }
+
   /* --- filtro de fechas (encabezado del boceto) --- */
   .filtros { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
   .filtros label { color: var(--text-secondary); font-size: 13px; }
@@ -95,6 +123,17 @@ Cómo funciona:
 {% endblock %}
 
 {% block content %}
+<!-- Pestañas de empresa: cada servicio pertenece a un cliente distinto y se
+     reconoce por el nombre de su geocerca (ver services.EMPRESAS). -->
+<div class="tabs" id="tabs-empresa">
+  <button class="activa" data-empresa="">Todas</button>
+  <button data-empresa="PROCAPS">PROCAPS</button>
+  <button data-empresa="DITAR">DITAR</button>
+  <button data-empresa="RELIANZ">RELIANZ</button>
+</div>
+
+<div class="nota-vacia" id="nota-vacia"></div>
+
 <!-- Encabezado del boceto: Desde DD/MM/AAAA hasta DD/MM/AAAA -->
 <div class="filtros">
   <label for="desde">Desde</label>
@@ -148,7 +187,10 @@ Cómo funciona:
   const inputDesde = document.getElementById('desde');
   const inputHasta = document.getElementById('hasta');
   const btn = document.getElementById('btn-consultar');
-  let datos = null;   // última respuesta del servidor (para repintar al cambiar tamaño)
+  const tabs = document.getElementById('tabs-empresa');
+  const notaVacia = document.getElementById('nota-vacia');
+  let datos = null;      // última respuesta del servidor (para repintar al cambiar tamaño)
+  let empresa = '';      // pestaña activa; '' = Todas
 
   // Rango inicial: últimos 7 días (incluyendo hoy).
   const hoyLocal = new Date();
@@ -221,8 +263,40 @@ Cómo funciona:
     });
   }
 
+  /*
+   * Si la pestaña de una empresa sale en ceros casi siempre es porque su
+   * geocerca todavía no existe en la plataforma web (no es un error): sin
+   * geocerca no hay servicios, y sin servicios no se les puede asignar
+   * timbradas. Se explica en pantalla para no dejar la página vacía y muda.
+   */
+  function revisarVacio() {
+    if (!datos) { notaVacia.classList.remove('visible'); return; }
+    const totalServicios = datos.vehiculos.reduce((a, v) => a + v.servicios, 0);
+    const huerfanas = datos.timbradas_sin_empresa || 0;
+    let msg = '';
+
+    if (datos.empresa && totalServicios === 0) {
+      msg = `<b>Sin servicios de ${datos.empresa} en este rango.</b> Los servicios ` +
+            `se cuentan cuando el bus entra a una geocerca de la empresa, así que ` +
+            `esta pestaña se queda vacía hasta que se creen en la plataforma las ` +
+            `geocercas de ${datos.empresa} con la alerta de entrada activada.`;
+    } else if (huerfanas > 0) {
+      // Una timbrada se le asigna a la empresa del viaje en el que se hizo; si
+      // ese día el bus no entró a ninguna geocerca, no hay viaje al cual
+      // asignarla y solo aparece en "Todas".
+      msg = `<b>${fmt(huerfanas)} timbradas sin empresa.</b> Son de buses que ese ` +
+            `día no registraron ninguna entrada a geocerca, así que no se sabe a ` +
+            `qué empresa asignarlas: aparecen en <b>Todas</b> pero en ninguna ` +
+            `pestaña de empresa. Se corrige agregando geocercas en la plataforma.`;
+    }
+
+    notaVacia.innerHTML = msg;
+    notaVacia.classList.toggle('visible', msg !== '');
+  }
+
   function pintarTodo() {
     if (!datos) return;
+    revisarVacio();
     const internos = datos.vehiculos.map(v => v.interno);
     pintarGrafica(document.getElementById('chart-servicios'), internos,
                   datos.vehiculos.map(v => v.servicios), 'linea', 'Servicios');
@@ -265,6 +339,7 @@ Cómo funciona:
   async function cargar() {
     const dias = diasDelRango();
     btn.disabled = true;
+    tabs.querySelectorAll('button').forEach(b => { b.disabled = true; });
     overlayMsg.textContent = `Consultando ${dias} ${dias === 1 ? 'día' : 'días'} de información…`;
     overlaySub.textContent = dias > DIAS_AVISO
       ? 'Elegiste un rango de más de un mes: el API de rastreo exige 30 segundos ' +
@@ -276,7 +351,8 @@ Cómo funciona:
     overlay.classList.add('visible');
     try {
       const url = '{% url "tracking:api_dashboard" %}' +
-        '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value;
+        '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value +
+        '&empresa=' + encodeURIComponent(empresa);
       const resp = await fetch(url);
       const data = await resp.json();
       if (data.error) { mostrarAviso(data.error); return; }
@@ -284,15 +360,27 @@ Cómo funciona:
       datos = data;
       pintarTodo();
       document.getElementById('estado').textContent =
+        (data.empresa || 'Todas las empresas') + ' · ' +
         ddmmaaaa(data.desde) + ' – ' + ddmmaaaa(data.hasta) +
         ' · actualizado ' + new Date().toLocaleTimeString('es-CO');
     } catch (e) {
       mostrarAviso('No se pudo conectar con el servidor: ' + e.message);
     } finally {
       btn.disabled = false;
+      tabs.querySelectorAll('button').forEach(b => { b.disabled = false; });
       overlay.classList.remove('visible');
     }
   }
+
+  // Cambiar de pestaña vuelve a consultar con el mismo rango de fechas. Los
+  // servicios ya están en cache, así que el cambio es casi instantáneo.
+  tabs.addEventListener('click', (ev) => {
+    const b = ev.target.closest('button');
+    if (!b || b.dataset.empresa === empresa) return;
+    empresa = b.dataset.empresa;
+    tabs.querySelectorAll('button').forEach(x => x.classList.toggle('activa', x === b));
+    cargar();
+  });
 
   btn.addEventListener('click', cargar);
   window.addEventListener('resize', pintarTodo);   // repintar al cambiar tamaño
