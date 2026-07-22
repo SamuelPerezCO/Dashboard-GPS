@@ -3,27 +3,23 @@
 =============================================================================
  DASHBOARD PRINCIPAL — hecho a partir del boceto en papel del usuario
 =============================================================================
-Estructura (una gráfica por fila, todas del mismo ancho; si aun así no caben
-los internos de TODOS los vehículos, cada gráfica tiene scroll horizontal):
-Structure (one chart per row, all the same width; if the plates of ALL the
-vehicles still don't fit, each chart has its own horizontal scroll):
+Estructura (rejilla 2x2; cada gráfica tiene scroll horizontal propio para que
+quepan los internos de TODOS los vehículos en el eje X):
+Structure (2x2 grid; each chart has its own horizontal scroll so the plates of
+ALL the vehicles fit on the X axis):
 
    [Todas] [PROCAPS] [DITAR / RELIANZ]      <- pestañas por empresa
    Desde [fecha]  hasta [fecha]  [Consultar] | [Última semana] [Último mes]
-   ┌───────────────────────────────────────────────────┐
-   │ Total Servicios (línea)                           │
-   ├───────────────────────────────────────────────────┤
-   │ Total Timbradas (línea)                           │
-   ├───────────────────────────────────────────────────┤
-   │ Ocupación real por vehículo (barras, %)           │
-   ├───────────────────────────────────────────────────┤
-   │ Capacidad total (barras, capacidad × servicios)   │
-   ├───────────────────────────────────────────────────┤
+   ┌─────────────────────────┬─────────────────────────┐
+   │ Total Servicios (línea) │ Total Timbradas (línea) │
+   ├─────────────────────────┼─────────────────────────┤
+   │ Ocupación real (barras) │ Capacidad total (barras)│
+   ├─────────────────────────┴─────────────────────────┤
    │ Detalle por día de las timbradas (tabla)          │
    └───────────────────────────────────────────────────┘
 
-Las 4 gráficas comparten la misma estructura: una por fila, a todo el ancho,
-con el número interno del vehículo en el eje X.
+Las 4 gráficas van en rejilla 2x2, todas del mismo tamaño y con el número
+interno del vehículo en el eje X. El detalle por día queda solo, a lo ancho.
 
 Cada servicio pertenece a una empresa distinta y se reconoce por el nombre de
 la geocerca en la que entra el bus. Las pestañas de arriba recalculan TODO el
@@ -129,9 +125,13 @@ Cómo funciona:
      solo, a lo ancho, debajo.
      2-column grid (Servicios|Timbradas); the day-by-day detail sits alone,
      full-width, below. */
-  /* Las 4 gráficas van una debajo de otra, todas del mismo ancho: con 35 buses
-     en el eje X, a media pantalla las etiquetas se encimaban y obligaban a
-     hacer scroll horizontal en cada tarjeta. */
+  /* Las 4 gráficas en rejilla 2x2. Con 35 buses en el eje X no caben todas las
+     etiquetas a media pantalla, así que cada tarjeta lleva su propio scroll
+     horizontal (.viz). min-width:0 es lo que permite ese scroll interno:
+     sin él la celda de la rejilla se estira y desborda la página. */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-2 .card { margin-bottom: 0; min-width: 0; }
+  @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
 
   /* Si los internos de todos los vehículos no caben en la tarjeta, la
      gráfica se puede desplazar horizontalmente.
@@ -189,6 +189,7 @@ Cómo funciona:
   <div class="sub" id="overlay-sub"></div>
 </div>
 
+<div class="grid-2">
 <div class="card">
   <h2>Total Servicios</h2>
   <p class="desc">Servicios por número interno del vehículo (entradas a la geocerca de referencia en el rango).</p>
@@ -212,6 +213,7 @@ Cómo funciona:
   <p class="desc">Puestos que ofreció cada número interno en el rango: capacidad del bus × total de servicios (p. ej. 31 asientos × 5 servicios = 155). Solo se muestran los vehículos con capacidad y servicios registrados.</p>
   <div class="viz" id="chart-capacidad"></div>
 </div>
+</div><!-- /grid-2 -->
 
 <div class="card">
   <h2>Detalle por día de las timbradas</h2>
