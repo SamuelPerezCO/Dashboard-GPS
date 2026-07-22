@@ -234,6 +234,8 @@ def range_summary(desde=None, hasta=None, empresa=None):
 
     vehiculos.sort(key=lambda v: v['interno'] or '')
     internos = [v['interno'] for v in vehiculos]
+    porcentajes = [v['ocupacion'] for v in vehiculos if v['ocupacion'] is not None]
+    ocupacion_flota = round(sum(porcentajes) / len(porcentajes)) if porcentajes else None
     return {
         'desde': desde,
         'hasta': hasta,
@@ -242,6 +244,8 @@ def range_summary(desde=None, hasta=None, empresa=None):
         'empresas': list(EMPRESAS),
         'etiquetas': dict(ETIQUETA_EMPRESA),
         'timbradas_inferidas': sin_empresa,
+        'ocupacion_flota': ocupacion_flota,
+        'vehiculos_en_promedio': len(porcentajes),
         'vehiculos': vehiculos,
         'detalle': {
             'internos': internos,

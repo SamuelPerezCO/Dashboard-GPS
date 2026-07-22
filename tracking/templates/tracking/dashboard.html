@@ -97,6 +97,16 @@ Cómo funciona:
   }
   .filtros .sep { width: 1px; height: 22px; background: var(--border); margin: 0 2px; }
 
+  /* Recuadro de la derecha: el promedio de ocupación de toda la flota. */
+  .tile-flota {
+    margin-left: auto; padding: 8px 18px; text-align: right;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .tile-flota .label { color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+  .tile-flota .value { font-size: 24px; font-weight: 650; line-height: 1.15; }
+  .tile-flota .sub { color: var(--text-muted); font-size: 11px; }
+  @media (max-width: 760px) { .tile-flota { margin-left: 0; text-align: left; } }
+
   /* --- overlay de carga: spinner grande centrado sobre toda la página --- */
   #overlay-carga {
     display: none; position: fixed; inset: 0; z-index: 1500;
@@ -164,6 +174,12 @@ Cómo funciona:
   <span class="sep"></span>
   <button class="rango" data-dias="7">Última semana</button>
   <button class="rango" data-dias="30">Último mes</button>
+
+  <div class="tile-flota">
+    <div class="label">Ocupación flota total</div>
+    <div class="value" id="flota-valor">—</div>
+    <div class="sub" id="flota-sub">sin consultar</div>
+  </div>
 </div>
 
 <!-- Spinner grande que cubre la página mientras se consulta el API -->
@@ -323,9 +339,26 @@ Cómo funciona:
     notaVacia.classList.toggle('visible', msg !== '');
   }
 
+  /*
+   * Ocupación de la flota = suma de los % de cada vehículo ÷ cuántos vehículos.
+   * Solo entran al promedio los que TIENEN porcentaje (con capacidad y con
+   * servicios); meter a los demás como 0 bajaría el promedio con datos que en
+   * realidad no existen. Por eso debajo se dice sobre cuántos buses se calculó.
+   */
+  function pintarFlota() {
+    const valor = datos.ocupacion_flota;
+    const n = datos.vehiculos_en_promedio || 0;
+    const total = datos.vehiculos.length;
+    document.getElementById('flota-valor').textContent = valor == null ? '—' : valor + '%';
+    document.getElementById('flota-sub').textContent = valor == null
+      ? 'ningún vehículo con datos'
+      : `promedio de ${n} de ${total} vehículos`;
+  }
+
   function pintarTodo() {
     if (!datos) return;
     revisarVacio();
+    pintarFlota();
     const internos = datos.vehiculos.map(v => v.interno);
     pintarGrafica(document.getElementById('chart-servicios'), internos,
                   datos.vehiculos.map(v => v.servicios), 'linea', 'Servicios');
