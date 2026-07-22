@@ -248,11 +248,6 @@ def range_summary(desde=None, hasta=None):
             except api_client.ApiError:
                 ev_rango = []
 
-        # Ocupación real (%) = promedio de pasajeros por viaje ÷ capacidad × 100
-        #   = timbradas ÷ (viajes × capacidad) × 100.
-        # Los viajes son los Servicios (cada entrada a la geocerca = 1 viaje).
-        # Es None si falta la capacidad o el bus no tiene viajes (no se puede
-        # dividir): así un bus sin servicios no aparece con 0% engañoso.
         timbradas = len(ev_rango)
         n_servicios = servicios.get(str(equipo), 0)
         capacidad = CAPACIDAD_POR_INTERNO.get(_norm_interno(interno))
