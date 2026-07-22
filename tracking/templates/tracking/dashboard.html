@@ -11,8 +11,6 @@ plates of ALL vehicles fit on the X axis):
    Desde [fecha]  hasta [fecha]  [Consultar]
    ┌─────────────────────────┬─────────────────────────┐
    │ Total Servicios (línea) │ Total Timbradas (línea) │
-   ├─────────────────────────┼─────────────────────────┤
-   │ Ocupación Real (barras) │ Ocupación Total (tabla) │
    ├─────────────────────────┴─────────────────────────┤
    │ Detalle por día de las timbradas (tabla)          │
    └───────────────────────────────────────────────────┘
@@ -24,8 +22,8 @@ Todas las gráficas tienen el número interno del vehículo en el eje X.
 Cómo funciona:
  1. Al cargar (o al presionar "Consultar") el JS llama a
     /api/dashboard/?desde=...&hasta=...
- 2. Con el JSON recibido dibuja las 3 gráficas (SVG generado aquí mismo,
-    sin librerías) y llena las 2 tablas.
+ 2. Con el JSON recibido dibuja las 2 gráficas (SVG generado aquí mismo,
+    sin librerías) y llena la tabla de detalle.
  3. La PRIMERA consulta es lenta (el servidor pregunta bus por bus al API
     de rastreo); las siguientes salen del cache y son casi instantáneas.
 =============================================================================
@@ -66,10 +64,10 @@ Cómo funciona:
   #overlay-carga .msg { font-size: 15px; font-weight: 550; max-width: 460px; }
   #overlay-carga .sub { color: var(--text-secondary); font-size: 13px; max-width: 460px; }
 
-  /* Rejilla de 2 columnas (Servicios|Timbradas, Ocupación Real|Ocupación
-     Total); el detalle por día queda solo, a lo ancho, debajo.
-     2-column grid (Servicios|Timbradas, Ocupación Real|Ocupación Total);
-     the day-by-day detail sits alone, full-width, below. */
+  /* Rejilla de 2 columnas (Servicios|Timbradas); el detalle por día queda
+     solo, a lo ancho, debajo.
+     2-column grid (Servicios|Timbradas); the day-by-day detail sits alone,
+     full-width, below. */
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
   .grid-2 .card { margin-bottom: 0; min-width: 0; }  /* min-width:0 permite el scroll interno / min-width:0 enables the inner scroll */
   @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
@@ -123,25 +121,6 @@ Cómo funciona:
   <p class="desc">Timbradas por número interno del vehículo en el rango.</p>
   <div class="viz" id="chart-timbradas"></div>
 </div>
-
-<div class="card">
-  <h2>Ocupación Real</h2>
-  <p class="desc">Pasajeros únicos por número interno del vehículo en el rango.</p>
-  <div class="viz" id="chart-ocupacion"></div>
-</div>
-
-<div class="card">
-  <h2>Ocupación Total</h2>
-  <p class="desc" id="desc-ocupacion-total">Pasajeros únicos de hoy y del mes en curso.</p>
-  <div class="scroll-x" style="max-height:290px; overflow-y:auto;">
-    <table id="tabla-ocupacion">
-      <thead>
-        <tr><th>Interno</th><th class="num">Total día</th><th class="num">Total mes</th></tr>
-      </thead>
-      <tbody><tr><td colspan="3" class="muted">Sin datos todavía.</td></tr></tbody>
-    </table>
-  </div>
-</div>
 </div><!-- /grid-2 -->
 
 <div class="card">
@@ -175,8 +154,7 @@ Cómo funciona:
    * Dibuja una gráfica SVG dentro de "cont".
    *  - labels: textos del eje X (los internos)
    *  - values: un número por etiqueta
-   *  - tipo:   'linea' (Servicios y Timbradas, como el boceto) o 'barras'
-   *            (Ocupación Real).
+   *  - tipo:   'linea' (Servicios y Timbradas, como el boceto) o 'barras'.
    * Sin librerías: se arma el SVG como texto y se le agregan zonas
    * invisibles de hover para el tooltip.
    */
@@ -242,19 +220,6 @@ Cómo funciona:
                   datos.vehiculos.map(v => v.servicios), 'linea', 'Servicios');
     pintarGrafica(document.getElementById('chart-timbradas'), internos,
                   datos.vehiculos.map(v => v.timbradas), 'linea', 'Timbradas');
-    pintarGrafica(document.getElementById('chart-ocupacion'), internos,
-                  datos.vehiculos.map(v => v.ocupacion), 'barras', 'Ocupación');
-
-    // Tabla Ocupación Total (día = hoy, mes = mes en curso)
-    document.getElementById('desc-ocupacion-total').textContent =
-      `Pasajeros únicos de hoy (${ddmmaaaa(datos.hoy)}) y del mes ${datos.mes}.`;
-    document.querySelector('#tabla-ocupacion tbody').innerHTML =
-      datos.ocupacion_total.map(o => `
-        <tr>
-          <td><b>${o.interno}</b></td>
-          <td class="num">${fmt(o.dia)}</td>
-          <td class="num">${fmt(o.mes)}</td>
-        </tr>`).join('');
 
     // Tabla Detalle por día: filas = fechas, columnas = internos
     document.querySelector('#tabla-detalle thead').innerHTML =

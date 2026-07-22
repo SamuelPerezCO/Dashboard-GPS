@@ -7,9 +7,9 @@ cuenta y resume para dejarlos listos tal como los pinta la página.
 
 Hay una función por dashboard:
 
-  - range_summary()  -> el dashboard principal (Servicios, Timbradas,
-                        Ocupación Real, Ocupación Total y detalle por día,
-                        todo filtrado por un rango de fechas desde/hasta).
+  - range_summary()  -> el dashboard principal (Servicios, Timbradas y
+                        detalle por día, todo filtrado por un rango de
+                        fechas desde/hasta).
   - fleet_summary()  -> la vista de mapa (guardada en /mapa/, sin enlace
                         en el menú por ahora).
 
@@ -145,24 +145,21 @@ def range_summary(desde=None, hasta=None):
     Dashboard principal: todo filtrado por un rango de fechas desde/hasta.
 
     Regresa lo que pide el boceto del dashboard:
-      - vehiculos:       por cada bus, Servicios / Timbradas / Ocupación Real
-                         acumulados en el rango (alimenta las 3 gráficas).
-      - ocupacion_total: por cada bus, pasajeros únicos del DÍA (hoy) y del
-                         MES en curso (la tabla "Ocupación Total").
-      - detalle:         matriz de timbradas por día x bus (la tabla
-                         "Detalle por día de las timbradas").
+      - vehiculos:  por cada bus, Servicios / Timbradas acumulados en el
+                    rango (alimenta las 2 gráficas).
+      - detalle:    matriz de timbradas por día x bus (la tabla
+                    "Detalle por día de las timbradas").
 
     Definiciones (explicación completa en api_client.py):
-      - Timbradas      = eventos "PASAJERO IDENTIFICADO" (id 2720).
-      - Ocupación Real = pasajeros únicos (tarjetas iButton distintas).
-      - Servicios      = entradas del bus a las geocercas de referencia
-                         (alertas de geocerca, ver _es_entrada_geocerca).
+      - Timbradas = eventos "PASAJERO IDENTIFICADO" (id 2720).
+      - Servicios = entradas del bus a las geocercas de referencia
+                    (alertas de geocerca, ver _es_entrada_geocerca).
 
     Estrategia para no saturar el API (mínimo 30 s entre peticiones):
-      * Eventos: UNA petición por bus que cubre del 1° del mes hasta hoy
-        (sirve para las columnas Día y Mes). Si el rango pedido cae dentro
-        de ese periodo, se reutiliza filtrando por fecha; solo si el rango
-        es más viejo se hace una petición extra por bus.
+      * Eventos: si el rango cae dentro del mes en curso, UNA petición por
+        bus del 1° del mes a hoy (cacheable y reutilizable entre rangos del
+        mismo mes); si el rango es más viejo, una petición por bus acotada
+        al rango pedido.
       * Servicios: getAlerts es por día pero trae TODA la flota, así que
         son pocas peticiones (una por día del rango).
       * Todo queda en cache (días pasados 24 h, datos de hoy unos minutos).
@@ -191,8 +188,7 @@ def range_summary(desde=None, hasta=None):
         for equipo, n in _servicios_por_equipo(d, d == hoy).items():
             servicios[equipo] += n
 
-    vehiculos = []            # filas para las 3 gráficas
-    ocupacion_total = []      # filas para la tabla Ocupación Total
+    vehiculos = []            # filas para las 2 gráficas
     conteo_dia_interno = Counter()  # {(fecha, interno): timbradas} para el detalle
     for veh in vehicles:
         equipo = veh.get('idgps')
@@ -200,19 +196,18 @@ def range_summary(desde=None, hasta=None):
         # p. ej. "INT 7074"), no por la placa (campo "patente").
         interno = veh.get('nombre') or veh.get('patente') or ''
 
-        # Eventos del mes en curso (1 petición por bus, cache 30 min).
-        ev_mes = []
-        if equipo:
+        # Eventos del rango pedido. Si el rango cabe en el mes en curso se
+        # pide el mes completo (1 petición por bus, cache 30 min, reutilizable
+        # entre rangos del mismo mes) y se filtra; si es más viejo, se pide
+        # solo el rango.
+        if not equipo or hasta_efectivo < desde:
+            ev_rango = []
+        elif rango_dentro_del_mes:
             try:
                 ev_mes = api_client.get_passenger_events(
                     equipo, primer_dia_mes, hoy, cache_ttl=1800)
             except api_client.ApiError:
                 ev_mes = []   # si un bus falla, no tumbar todo el dashboard
-
-        # Eventos del rango pedido: reutilizar los del mes si se puede.
-        if not equipo or hasta_efectivo < desde:
-            ev_rango = []
-        elif rango_dentro_del_mes:
             ev_rango = [e for e in ev_mes if desde <= e['fecha'] <= hasta_efectivo]
         else:
             ttl = 600 if hasta_efectivo == hoy else 24 * 3600
@@ -222,22 +217,11 @@ def range_summary(desde=None, hasta=None):
             except api_client.ApiError:
                 ev_rango = []
 
-        # Acumulados del rango (gráficas).
-        pasajeros_rango = {e['pasajero'] for e in ev_rango if e['pasajero']}
         vehiculos.append({
             'interno': interno,
             'equipo': equipo,
             'servicios': servicios.get(str(equipo), 0),
             'timbradas': len(ev_rango),
-            'ocupacion': len(pasajeros_rango),
-        })
-
-        # Tabla Ocupación Total: pasajeros únicos de HOY y del MES en curso.
-        ocupacion_total.append({
-            'interno': interno,
-            'dia': len({e['pasajero'] for e in ev_mes
-                        if e['pasajero'] and e['fecha'] == hoy}),
-            'mes': len({e['pasajero'] for e in ev_mes if e['pasajero']}),
         })
 
         # Matriz del detalle por día.
@@ -245,15 +229,12 @@ def range_summary(desde=None, hasta=None):
             conteo_dia_interno[(e['fecha'], interno)] += 1
 
     vehiculos.sort(key=lambda v: v['interno'] or '')
-    ocupacion_total.sort(key=lambda v: v['interno'] or '')
     internos = [v['interno'] for v in vehiculos]
     return {
         'desde': desde,
         'hasta': hasta,
         'hoy': hoy,
-        'mes': hoy[:7],                     # 'YYYY-MM' para el título de la tabla
         'vehiculos': vehiculos,
-        'ocupacion_total': ocupacion_total,
         'detalle': {
             'internos': internos,
             'filas': [{'fecha': d,
