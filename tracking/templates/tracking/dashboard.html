@@ -12,7 +12,7 @@ plates of ALL vehicles fit on the X axis):
    ┌─────────────────────────┬─────────────────────────┐
    │ Total Servicios (línea) │ Total Timbradas (línea) │
    ├─────────────────────────┴─────────────────────────┤
-   │ Ocupación por vehículo (barras, %)                │
+   │ Ocupación real por vehículo (barras, %)           │
    ├───────────────────────────────────────────────────┤
    │ Detalle por día de las timbradas (tabla)          │
    └───────────────────────────────────────────────────┘
@@ -126,8 +126,8 @@ Cómo funciona:
 </div><!-- /grid-2 -->
 
 <div class="card">
-  <h2>Ocupación por vehículo</h2>
-  <p class="desc">Porcentaje de ocupación por número interno del vehículo (timbradas ÷ capacidad × 100) en el rango. Solo se muestran los vehículos con capacidad registrada.</p>
+  <h2>Ocupación real por vehículo</h2>
+  <p class="desc">Ocupación promedio por viaje por número interno del vehículo: pasajeros por viaje ÷ capacidad × 100 (timbradas ÷ servicios ÷ capacidad × 100) en el rango. Solo se muestran los vehículos con capacidad y servicios registrados.</p>
   <div class="viz" id="chart-ocupacion"></div>
 </div>
 
@@ -229,13 +229,14 @@ Cómo funciona:
     pintarGrafica(document.getElementById('chart-timbradas'), internos,
                   datos.vehiculos.map(v => v.timbradas), 'linea', 'Timbradas');
 
-    // Ocupación por vehículo (%) = timbradas ÷ capacidad × 100.
-    // Solo los buses con capacidad registrada (v.ocupacion != null); el eje X
-    // lleva únicamente el número interno (INT 7076, ...).
+    // Ocupación real por vehículo (%) = timbradas ÷ (servicios × capacidad) × 100
+    // = promedio de pasajeros por viaje ÷ capacidad. Solo los buses con
+    // capacidad y servicios (v.ocupacion != null); el eje X lleva únicamente
+    // el número interno (INT 7076, ...).
     const conCap = datos.vehiculos.filter(v => v.ocupacion != null);
     pintarGrafica(document.getElementById('chart-ocupacion'),
                   conCap.map(v => v.interno),
-                  conCap.map(v => v.ocupacion), 'barras', 'Ocupación', '%');
+                  conCap.map(v => v.ocupacion), 'barras', 'Ocupación real', '%');
 
     // Tabla Detalle por día: filas = fechas, columnas = internos
     document.querySelector('#tabla-detalle thead').innerHTML =

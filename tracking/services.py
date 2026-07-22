@@ -180,9 +180,11 @@ def range_summary(desde=None, hasta=None):
       - Timbradas = eventos "PASAJERO IDENTIFICADO" (id 2720).
       - Servicios = entradas del bus a las geocercas de referencia
                     (alertas de geocerca, ver _es_entrada_geocerca).
-      - Ocupación = % de ocupación por vehículo = timbradas ÷ capacidad × 100
-                    (capacidad = asientos del bus, ver CAPACIDAD_POR_INTERNO).
-                    Es None si no se conoce la capacidad del bus.
+      - Ocupación = ocupación real (%) = promedio de pasajeros por viaje ÷
+                    capacidad × 100 = timbradas ÷ (servicios × capacidad) × 100.
+                    Los viajes son los Servicios (1 entrada a geocerca = 1 viaje);
+                    capacidad = asientos del bus (ver CAPACIDAD_POR_INTERNO).
+                    Es None si falta la capacidad o el bus no tiene servicios.
 
     Estrategia para no saturar el API (mínimo 30 s entre peticiones):
       * Eventos: si el rango cae dentro del mes en curso, UNA petición por
@@ -246,16 +248,25 @@ def range_summary(desde=None, hasta=None):
             except api_client.ApiError:
                 ev_rango = []
 
-        # % de ocupación = timbradas ÷ capacidad × 100 (None si no hay capacidad).
+        # Ocupación real (%) = promedio de pasajeros por viaje ÷ capacidad × 100
+        #   = timbradas ÷ (viajes × capacidad) × 100.
+        # Los viajes son los Servicios (cada entrada a la geocerca = 1 viaje).
+        # Es None si falta la capacidad o el bus no tiene viajes (no se puede
+        # dividir): así un bus sin servicios no aparece con 0% engañoso.
         timbradas = len(ev_rango)
+        n_servicios = servicios.get(str(equipo), 0)
         capacidad = CAPACIDAD_POR_INTERNO.get(_norm_interno(interno))
+        if capacidad and n_servicios:
+            ocupacion = round(timbradas / (n_servicios * capacidad) * 100)
+        else:
+            ocupacion = None
         vehiculos.append({
             'interno': interno,
             'equipo': equipo,
-            'servicios': servicios.get(str(equipo), 0),
+            'servicios': n_servicios,
             'timbradas': timbradas,
             'capacidad': capacidad,
-            'ocupacion': round(timbradas / capacidad * 100) if capacidad else None,
+            'ocupacion': ocupacion,
         })
 
         # Matriz del detalle por día.
