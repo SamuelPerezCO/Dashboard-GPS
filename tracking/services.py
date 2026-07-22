@@ -218,7 +218,7 @@ def range_summary(desde=None, hasta=None, empresa=None):
             ocupacion = round(timbradas / (n_servicios * capacidad) * 100)
         else:
             ocupacion = None
-        capacidad_total = round(timbradas / n_servicios, 1) if n_servicios else None
+        capacidad_total = capacidad * n_servicios if capacidad and n_servicios else None
         vehiculos.append({
             'interno': interno,
             'equipo': equipo,
