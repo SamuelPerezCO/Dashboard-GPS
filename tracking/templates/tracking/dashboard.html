@@ -8,7 +8,7 @@ propio para que quepan los internos de TODOS los vehículos en el eje X):
 Structure (2-column grid; each chart has its own horizontal scroll so the
 plates of ALL vehicles fit on the X axis):
 
-   [Todas] [PROCAPS] [DITAR] [RELIANZ]      <- pestañas por empresa
+   [Todas] [PROCAPS] [DITAR / RELIANZ]      <- pestañas por empresa
    Desde [fecha]  hasta [fecha]  [Consultar] | [Última semana] [Último mes]
    ┌─────────────────────────┬─────────────────────────┐
    │ Total Servicios (línea) │ Total Timbradas (línea) │
@@ -20,9 +20,13 @@ plates of ALL vehicles fit on the X axis):
    │ Detalle por día de las timbradas (tabla)          │
    └───────────────────────────────────────────────────┘
 
-Cada servicio pertenece a una empresa distinta (PROCAPS, DITAR, RELIANZ) y se
-reconoce por el nombre de la geocerca en la que entra el bus. Las pestañas de
-arriba recalculan TODO el dashboard para una sola empresa.
+Cada servicio pertenece a una empresa distinta y se reconoce por el nombre de
+la geocerca en la que entra el bus. Las pestañas de arriba recalculan TODO el
+dashboard para una sola empresa.
+
+Hoy solo existe la geocerca de PROCAPS, así que DITAR y RELIANZ no se pueden
+separar entre sí: van juntas en una pestaña que agrupa "todo lo que no es
+PROCAPS". Cuando se creen sus geocercas se podrán partir en dos.
 
    (En pantallas angostas la rejilla vuelve a una sola columna.)
    (On narrow screens the grid falls back to a single column.)
@@ -140,8 +144,7 @@ Cómo funciona:
 <div class="tabs" id="tabs-empresa">
   <button class="activa" data-empresa="">Todas</button>
   <button data-empresa="PROCAPS">PROCAPS</button>
-  <button data-empresa="DITAR">DITAR</button>
-  <button data-empresa="RELIANZ">RELIANZ</button>
+  <button data-empresa="DITAR-RELIANZ">DITAR / RELIANZ</button>
 </div>
 
 <div class="nota-vacia" id="nota-vacia"></div>
@@ -291,25 +294,32 @@ Cómo funciona:
    * geocerca no hay servicios, y sin servicios no se les puede asignar
    * timbradas. Se explica en pantalla para no dejar la página vacía y muda.
    */
+  /*
+   * La pestaña DITAR / RELIANZ no se mide: se deduce por descarte (todo lo que
+   * NO entra a la geocerca de PROCAPS). Hay que decirlo en pantalla, porque
+   * parte de esas timbradas son en realidad de buses de PROCAPS que ese día no
+   * registraron su entrada a la geocerca.
+   */
   function revisarVacio() {
     if (!datos) { notaVacia.classList.remove('visible'); return; }
+    const etiqueta = (datos.etiquetas || {})[datos.empresa] || datos.empresa;
     const totalServicios = datos.vehiculos.reduce((a, v) => a + v.servicios, 0);
-    const huerfanas = datos.timbradas_sin_empresa || 0;
+    const totalTimbradas = datos.vehiculos.reduce((a, v) => a + v.timbradas, 0);
+    const inferidas = datos.timbradas_inferidas || 0;
     let msg = '';
 
-    if (datos.empresa && totalServicios === 0) {
-      msg = `<b>Sin servicios de ${datos.empresa} en este rango.</b> Los servicios ` +
-            `se cuentan cuando el bus entra a una geocerca de la empresa, así que ` +
-            `esta pestaña se queda vacía hasta que se creen en la plataforma las ` +
-            `geocercas de ${datos.empresa} con la alerta de entrada activada.`;
-    } else if (huerfanas > 0) {
-      // Una timbrada se le asigna a la empresa del viaje en el que se hizo; si
-      // ese día el bus no entró a ninguna geocerca, no hay viaje al cual
-      // asignarla y solo aparece en "Todas".
-      msg = `<b>${fmt(huerfanas)} timbradas sin empresa.</b> Son de buses que ese ` +
-            `día no registraron ninguna entrada a geocerca, así que no se sabe a ` +
-            `qué empresa asignarlas: aparecen en <b>Todas</b> pero en ninguna ` +
-            `pestaña de empresa. Se corrige agregando geocercas en la plataforma.`;
+    if (datos.empresa === 'DITAR-RELIANZ') {
+      const pct = totalTimbradas ? Math.round(100 * inferidas / totalTimbradas) : 0;
+      msg = `<b>Esta pestaña es una deducción, no una medición.</b> Aquí cae todo ` +
+            `lo que NO entra a la geocerca de PROCAPS. De sus ${fmt(totalTimbradas)} ` +
+            `timbradas, ${fmt(inferidas)} (${pct}%) son de buses que ese día no ` +
+            `registraron ninguna entrada a geocerca: la mayoría son de DITAR o ` +
+            `RELIANZ, pero algunas son de PROCAPS con la entrada sin registrar. ` +
+            `Para separar DITAR de RELIANZ —y para que este número sea exacto— ` +
+            `hay que crear sus geocercas en la plataforma.`;
+    } else if (datos.empresa && totalServicios === 0) {
+      msg = `<b>Sin servicios de ${etiqueta} en este rango.</b> Los servicios se ` +
+            `cuentan cuando el bus entra a una geocerca de la empresa.`;
     }
 
     notaVacia.innerHTML = msg;
@@ -390,7 +400,7 @@ Cómo funciona:
       datos = data;
       pintarTodo();
       document.getElementById('estado').textContent =
-        (data.empresa || 'Todas las empresas') + ' · ' +
+        ((data.etiquetas || {})[data.empresa] || 'Todas las empresas') + ' · ' +
         ddmmaaaa(data.desde) + ' – ' + ddmmaaaa(data.hasta) +
         ' · actualizado ' + new Date().toLocaleTimeString('es-CO');
     } catch (e) {

@@ -26,7 +26,12 @@ _CAPACIDAD_CRUDA = {
 CAPACIDAD_POR_INTERNO = {_norm_interno(k): v for k, v in _CAPACIDAD_CRUDA.items()}
 
 
-EMPRESAS = ('PROCAPS', 'DITAR', 'RELIANZ')
+EMPRESAS = ('PROCAPS', 'DITAR-RELIANZ')
+
+ETIQUETA_EMPRESA = {
+    'PROCAPS': 'PROCAPS',
+    'DITAR-RELIANZ': 'DITAR / RELIANZ',
+}
 
 _PATRON_EMPRESA = (
     ('PROCAPS', re.compile(r'^(?:PROCAPS|RUTA\s*\d+)', re.IGNORECASE)),
@@ -49,6 +54,10 @@ def empresa_de_geocerca(nombre):
         if patron.match(nombre):
             return empresa
     return None
+
+
+def tab_de_empresa(empresa):
+    return 'PROCAPS' if empresa == 'PROCAPS' else 'DITAR-RELIANZ'
 
 
 def fleet_summary():
@@ -165,7 +174,7 @@ def range_summary(desde=None, hasta=None, empresa=None):
             continue
         for s in _servicios_del_dia(d, d == hoy):
             servicios_bus_dia[(s['equipo'], d)].append((s['hora'], s['empresa']))
-            if empresa is None or s['empresa'] == empresa:
+            if empresa is None or tab_de_empresa(s['empresa']) == empresa:
                 servicios[s['equipo']] += 1
 
     vehiculos = []
@@ -199,7 +208,8 @@ def range_summary(desde=None, hasta=None, empresa=None):
         ]
         sin_empresa += sum(1 for e in emp_por_timbrada if e is None)
         if empresa is not None:
-            ev_rango = [e for e, emp in zip(ev_rango, emp_por_timbrada) if emp == empresa]
+            ev_rango = [e for e, emp in zip(ev_rango, emp_por_timbrada)
+                        if tab_de_empresa(emp) == empresa]
 
         timbradas = len(ev_rango)
         n_servicios = servicios.get(str(equipo), 0)
@@ -230,7 +240,8 @@ def range_summary(desde=None, hasta=None, empresa=None):
         'hoy': hoy,
         'empresa': empresa,
         'empresas': list(EMPRESAS),
-        'timbradas_sin_empresa': sin_empresa,
+        'etiquetas': dict(ETIQUETA_EMPRESA),
+        'timbradas_inferidas': sin_empresa,
         'vehiculos': vehiculos,
         'detalle': {
             'internos': internos,
