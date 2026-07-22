@@ -289,12 +289,6 @@ Cómo funciona:
   }
 
   /*
-   * Si la pestaña de una empresa sale en ceros casi siempre es porque su
-   * geocerca todavía no existe en la plataforma web (no es un error): sin
-   * geocerca no hay servicios, y sin servicios no se les puede asignar
-   * timbradas. Se explica en pantalla para no dejar la página vacía y muda.
-   */
-  /*
    * La pestaña DITAR / RELIANZ no se mide: se deduce por descarte (todo lo que
    * NO entra a la geocerca de PROCAPS). Hay que decirlo en pantalla, porque
    * parte de esas timbradas son en realidad de buses de PROCAPS que ese día no
@@ -375,6 +369,36 @@ Cómo funciona:
     return Math.abs(Math.round((d2 - d1) / 86400000)) + 1;
   }
 
+  /*
+   * Pide el JSON una vez. Si lo que vuelve NO es JSON, casi siempre es que la
+   * consulta se pasó del tiempo límite y un intermediario (Cloudflare, Render)
+   * devolvió su propia página HTML de error. Eso se marca como reintentable:
+   * el servidor sigue trabajando por su lado y deja el resultado en cache, así
+   * que el siguiente intento suele responder de inmediato.
+   */
+  async function pedirJson(url) {
+    let resp;
+    try {
+      resp = await fetch(url);
+    } catch (e) {
+      const err = new Error('No se pudo conectar con el servidor: ' + e.message);
+      err.reintentable = true;
+      throw err;
+    }
+    const tipo = resp.headers.get('content-type') || '';
+    if (!tipo.includes('application/json')) {
+      const err = new Error(
+        `La consulta tardó demasiado y el servidor devolvió una página de error ` +
+        `(HTTP ${resp.status}).`);
+      err.reintentable = true;
+      throw err;
+    }
+    return resp.json();
+  }
+
+  const REINTENTOS = 3;
+  const ESPERA_REINTENTO = 3000;
+
   async function cargar() {
     const dias = diasDelRango();
     btn.disabled = true;
@@ -393,8 +417,26 @@ Cómo funciona:
       const url = '{% url "tracking:api_dashboard" %}' +
         '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value +
         '&empresa=' + encodeURIComponent(empresa);
-      const resp = await fetch(url);
-      const data = await resp.json();
+
+      // Se reintenta solo lo que vale la pena reintentar (timeouts y cortes de
+      // red). Un error que el servidor SÍ alcanzó a explicar en JSON se muestra
+      // tal cual: reintentarlo daría el mismo resultado.
+      let data = null;
+      for (let intento = 1; intento <= REINTENTOS; intento++) {
+        try {
+          data = await pedirJson(url);
+          break;
+        } catch (e) {
+          if (!e.reintentable || intento === REINTENTOS) throw e;
+          overlayMsg.textContent = `Reintentando… (${intento + 1} de ${REINTENTOS})`;
+          overlaySub.textContent =
+            'La consulta anterior se pasó del tiempo límite, pero el servidor ' +
+            'siguió trabajando y va dejando los datos en cache. El reintento ' +
+            'suele responder mucho más rápido.';
+          await new Promise(r => setTimeout(r, ESPERA_REINTENTO));
+        }
+      }
+
       if (data.error) { mostrarAviso(data.error); return; }
       ocultarAviso();
       datos = data;
@@ -404,7 +446,8 @@ Cómo funciona:
         ddmmaaaa(data.desde) + ' – ' + ddmmaaaa(data.hasta) +
         ' · actualizado ' + new Date().toLocaleTimeString('es-CO');
     } catch (e) {
-      mostrarAviso('No se pudo conectar con el servidor: ' + e.message);
+      mostrarAviso(e.message + ` Se intentó ${REINTENTOS} veces. Vuelve a ` +
+                   `presionar Consultar: cada intento deja más datos en cache.`);
     } finally {
       btn.disabled = false;
       tabs.querySelectorAll('button').forEach(b => { b.disabled = false; });
