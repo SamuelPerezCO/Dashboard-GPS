@@ -9,11 +9,13 @@ Structure (2-column grid; each chart has its own horizontal scroll so the
 plates of ALL vehicles fit on the X axis):
 
    [Todas] [PROCAPS] [DITAR] [RELIANZ]      <- pestañas por empresa
-   Desde [fecha]  hasta [fecha]  [Consultar]
+   Desde [fecha]  hasta [fecha]  [Consultar] | [Última semana] [Último mes]
    ┌─────────────────────────┬─────────────────────────┐
    │ Total Servicios (línea) │ Total Timbradas (línea) │
    ├─────────────────────────┴─────────────────────────┤
    │ Ocupación real por vehículo (barras, %)           │
+   ├───────────────────────────────────────────────────┤
+   │ Capacidad total (barras, timbradas ÷ servicios)   │
    ├───────────────────────────────────────────────────┤
    │ Detalle por día de las timbradas (tabla)          │
    └───────────────────────────────────────────────────┘
@@ -75,6 +77,16 @@ Cómo funciona:
     padding: 7px 14px; font: inherit; font-weight: 550; cursor: pointer;
   }
   .filtros button:disabled { opacity: 0.6; cursor: wait; }
+
+  /* Atajos de rango: secundarios, para no competir con "Consultar". */
+  .filtros button.rango {
+    background: none; color: var(--text-secondary);
+    border: 1px solid var(--border); font-weight: 500;
+  }
+  .filtros button.rango:hover:not(:disabled) {
+    background: var(--grid); color: var(--text-primary);
+  }
+  .filtros .sep { width: 1px; height: 22px; background: var(--border); margin: 0 2px; }
 
   /* --- overlay de carga: spinner grande centrado sobre toda la página --- */
   #overlay-carga {
@@ -141,6 +153,9 @@ Cómo funciona:
   <label for="hasta">hasta</label>
   <input type="date" id="hasta">
   <button id="btn-consultar">Consultar</button>
+  <span class="sep"></span>
+  <button class="rango" data-dias="7">Última semana</button>
+  <button class="rango" data-dias="30">Último mes</button>
 </div>
 
 <!-- Spinner grande que cubre la página mientras se consulta el API -->
@@ -171,6 +186,12 @@ Cómo funciona:
 </div>
 
 <div class="card">
+  <h2>Capacidad total</h2>
+  <p class="desc">Pasajeros promedio por servicio de cada número interno: timbradas ÷ total de servicios en el rango. Solo se muestran los vehículos con servicios registrados.</p>
+  <div class="viz" id="chart-capacidad"></div>
+</div>
+
+<div class="card">
   <h2>Detalle por día de las timbradas</h2>
   <p class="desc">Timbradas de cada vehículo, día por día del rango consultado.</p>
   <div class="scroll-x">
@@ -189,6 +210,7 @@ Cómo funciona:
   const btn = document.getElementById('btn-consultar');
   const tabs = document.getElementById('tabs-empresa');
   const notaVacia = document.getElementById('nota-vacia');
+  const botonesRango = document.querySelectorAll('.filtros button.rango');
   let datos = null;      // última respuesta del servidor (para repintar al cambiar tamaño)
   let empresa = '';      // pestaña activa; '' = Todas
 
@@ -312,6 +334,13 @@ Cómo funciona:
                   conCap.map(v => v.interno),
                   conCap.map(v => v.ocupacion), 'barras', 'Ocupación real', '%');
 
+    // Capacidad total = timbradas ÷ servicios (pasajeros promedio por viaje).
+    // Solo los buses con servicios en el rango (v.capacidad_total != null).
+    const conServ = datos.vehiculos.filter(v => v.capacidad_total != null);
+    pintarGrafica(document.getElementById('chart-capacidad'),
+                  conServ.map(v => v.interno),
+                  conServ.map(v => v.capacidad_total), 'barras', 'Pasajeros por servicio');
+
     // Tabla Detalle por día: filas = fechas, columnas = internos
     document.querySelector('#tabla-detalle thead').innerHTML =
       '<tr><th>Fecha</th>' + datos.detalle.internos.map(p => `<th class="num">${p}</th>`).join('') + '</tr>';
@@ -340,6 +369,7 @@ Cómo funciona:
     const dias = diasDelRango();
     btn.disabled = true;
     tabs.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    botonesRango.forEach(b => { b.disabled = true; });
     overlayMsg.textContent = `Consultando ${dias} ${dias === 1 ? 'día' : 'días'} de información…`;
     overlaySub.textContent = dias > DIAS_AVISO
       ? 'Elegiste un rango de más de un mes: el API de rastreo exige 30 segundos ' +
@@ -368,6 +398,7 @@ Cómo funciona:
     } finally {
       btn.disabled = false;
       tabs.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      botonesRango.forEach(b => { b.disabled = false; });
       overlay.classList.remove('visible');
     }
   }
@@ -381,6 +412,17 @@ Cómo funciona:
     tabs.querySelectorAll('button').forEach(x => x.classList.toggle('activa', x === b));
     cargar();
   });
+
+  // Atajos de rango: cuentan hacia atrás desde hoy (7 y 30 días, hoy incluido),
+  // igual que el rango por defecto al abrir la página.
+  botonesRango.forEach(b => b.addEventListener('click', () => {
+    const dias = +b.dataset.dias;
+    const fin = new Date();
+    const ini = new Date(fin); ini.setDate(fin.getDate() - (dias - 1));
+    inputHasta.value = fin.toLocaleDateString('sv-SE');
+    inputDesde.value = ini.toLocaleDateString('sv-SE');
+    cargar();
+  }));
 
   btn.addEventListener('click', cargar);
   window.addEventListener('resize', pintarTodo);   // repintar al cambiar tamaño
