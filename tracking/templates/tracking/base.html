@@ -89,7 +89,13 @@ Contiene:
   }
   nav a:hover { background: var(--grid); }
   nav a.active { color: var(--text-primary); background: var(--grid); }
-  #estado { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+  /* Nombre del cliente (empresa dueña de la flota) a la derecha del header. */
+  .marca-cliente {
+    margin-left: auto; display: flex; flex-direction: column;
+    align-items: flex-end; gap: 2px;
+  }
+  .marca-cliente .nombre { font-size: 15px; font-weight: 650; }
+  #estado { color: var(--text-muted); font-size: 12px; }
   main { max-width: 1200px; margin: 0 auto; padding: 20px 24px 48px; }
 
   .aviso {
@@ -156,7 +162,10 @@ Contiene:
   <nav>
     <a href="{% url 'tracking:dashboard' %}" class="active">Dashboard</a>
   </nav>
-  <span id="estado"></span>
+  <div class="marca-cliente">
+    <span class="nombre">Expreso Brasilia</span>
+    <span id="estado"></span>
+  </div>
 </header>
 <main>
   <div class="aviso" id="aviso"></div>
