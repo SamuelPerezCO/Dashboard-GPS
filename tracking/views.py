@@ -1,3 +1,10 @@
+"""Vistas HTTP de la app tracking.
+
+Expone las páginas del dashboard (ocupación por rango de fechas y mapa
+de flota en vivo) y sus respectivos endpoints JSON, que delegan toda
+la lógica de negocio en :mod:`tracking.services`.
+"""
+
 import logging
 import re
 
@@ -8,20 +15,50 @@ from . import api_client, services
 
 logger = logging.getLogger(__name__)
 
-FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
-
+FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')  # Valida fechas en formato YYYY-MM-DD.
 
 
 def dashboard(request):
+    """Renderiza la página principal del dashboard de ocupación.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        HttpResponse con la plantilla ``tracking/dashboard.html``.
+    """
     return render(request, 'tracking/dashboard.html')
 
 
 def fleet_dashboard(request):
+    """Renderiza la página del mapa de flota en vivo.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        HttpResponse con la plantilla ``tracking/fleet.html``.
+    """
     return render(request, 'tracking/fleet.html')
 
 
-
 def _json_api(build):
+    """Ejecuta ``build`` y envuelve el resultado (o error) en un JsonResponse.
+
+    Centraliza el manejo de errores de los endpoints JSON, traduciendo
+    las excepciones conocidas del cliente del API a códigos de estado
+    HTTP apropiados.
+
+    Args:
+        build: Función sin argumentos que construye y devuelve el
+            diccionario de datos a serializar como JSON.
+
+    Returns:
+        JsonResponse con los datos de ``build()`` si todo sale bien, o
+        con ``{'error': ...}`` y el status HTTP correspondiente si
+        ocurre un error de validación (400), de configuración (503),
+        del WebService (502) o inesperado (502).
+    """
     try:
         return JsonResponse(build())
     except ValueError as exc:
@@ -40,6 +77,23 @@ def _json_api(build):
 
 
 def api_dashboard(request):
+    """Endpoint JSON con el resumen de ocupación para un rango de fechas.
+
+    Lee los parámetros de querystring ``desde``, ``hasta`` y ``empresa``,
+    los valida y delega el cálculo en :func:`tracking.services.range_summary`.
+
+    Args:
+        request: El HttpRequest entrante. Parámetros GET esperados:
+
+            * ``desde`` (opcional): fecha inicial, formato ``YYYY-MM-DD``.
+            * ``hasta`` (opcional): fecha final, formato ``YYYY-MM-DD``.
+            * ``empresa`` (opcional): uno de los valores de
+              :data:`tracking.services.EMPRESAS`.
+
+    Returns:
+        JsonResponse con el resumen de ocupación, o con un error 400 si
+        las fechas o la empresa no son válidas.
+    """
     desde = request.GET.get('desde') or None
     hasta = request.GET.get('hasta') or None
     for f in (desde, hasta):
@@ -55,4 +109,12 @@ def api_dashboard(request):
 
 
 def api_fleet(request):
+    """Endpoint JSON con el estado en vivo de toda la flota.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        JsonResponse con el resultado de :func:`tracking.services.fleet_summary`.
+    """
     return _json_api(services.fleet_summary)
