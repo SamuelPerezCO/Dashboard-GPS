@@ -1,0 +1,79 @@
+{% extends 'tracking/base.html' %}
+{% comment %}
+=============================================================================
+ ACCESO — formulario de entrada al dashboard
+=============================================================================
+No hay usuarios en base de datos: se compara contra DASHBOARD_USER y
+DASHBOARD_PASSWORD de config/settings.py (ver tracking/views.py:login_view).
+
+Esta página es la única que se puede ver sin sesión iniciada; de eso se
+encarga tracking/middleware.py. Por eso oculta el menú y el nombre del
+cliente del encabezado: todavía no hay nadie dentro.
+=============================================================================
+{% endcomment %}
+{% block title %}Entrar — Rastrelital{% endblock %}
+
+{# Sin sesión no hay menú, ni cliente, ni botón de salir: solo la marca. #}
+{% block barra %}{% endblock %}
+
+{% block head %}
+<style>
+  /* Tarjeta centrada en la parte alta de la página, no en el medio: así no
+     salta cuando aparece el mensaje de error. */
+  .acceso {
+    max-width: 340px; margin: 8vh auto 0;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px 26px;
+  }
+  .acceso h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
+  .acceso .desc { color: var(--text-muted); font-size: 13px; margin: 0 0 20px; }
+  .acceso label {
+    display: block; color: var(--text-secondary);
+    font-size: 12px; font-weight: 550; margin-bottom: 5px;
+  }
+  .acceso .campo { margin-bottom: 14px; }
+  .acceso input {
+    width: 100%; font: inherit;
+    background: var(--page); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 7px; padding: 9px 11px;
+  }
+  .acceso input:focus {
+    outline: none; border-color: var(--series-1);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-1) 22%, transparent);
+  }
+  .acceso button {
+    width: 100%; margin-top: 6px;
+    background: var(--series-1); color: #fff; border: none; border-radius: 7px;
+    padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .acceso button:hover { filter: brightness(1.06); }
+  .acceso .error {
+    background: color-mix(in srgb, var(--critical) 12%, transparent);
+    border: 1px solid var(--critical); border-radius: 7px;
+    padding: 9px 11px; margin-bottom: 16px; font-size: 13px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<form class="acceso" method="post" action="{% url 'tracking:login' %}">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{{ next }}">
+  <h2>Entrar</h2>
+  <p class="desc">Escribe tus datos para ver el dashboard.</p>
+
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+  <div class="campo">
+    <label for="usuario">Usuario</label>
+    <input type="text" id="usuario" name="usuario" autocomplete="username"
+           autofocus required>
+  </div>
+  <div class="campo">
+    <label for="clave">Contraseña</label>
+    <input type="password" id="clave" name="clave"
+           autocomplete="current-password" required>
+  </div>
+  <button type="submit">Entrar</button>
+</form>
+{% endblock %}

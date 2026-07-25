@@ -56,6 +56,26 @@ GPS_USERNAME = os.getenv('GPS_USERNAME', '')
 GPS_PASSWORD = os.getenv('GPS_PASSWORD', '')
 
 
+# --- Acceso al dashboard (login simple, un solo usuario) ---
+# No hay usuarios en base de datos: el dashboard se protege con estas dos
+# credenciales, que compara tracking/views.py y exige
+# tracking.middleware.LoginRequeridoMiddleware en todas las páginas.
+#
+# El valor por defecto es 1234/1234 para poder entrar de una vez. Es una
+# credencial débil y el sitio es público (dashboardgps.qd.je): para producción
+# escribe DASHBOARD_USER y DASHBOARD_PASSWORD en el .env (que no se sube a git)
+# y no hace falta tocar el código.
+DASHBOARD_USER = os.getenv('DASHBOARD_USER', '1234')
+DASHBOARD_PASSWORD = os.getenv('DASHBOARD_PASSWORD', '1234')
+
+# La sesión dura una jornada de trabajo y se renueva en cada visita.
+SESSION_COOKIE_AGE = 12 * 60 * 60
+SESSION_SAVE_EVERY_REQUEST = True
+# Fuera de desarrollo las cookies solo viajan por HTTPS.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -79,6 +99,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Va de última: exige haber iniciado sesión para ver cualquier página del
+    # dashboard. Necesita la sesión y el CSRF ya resueltos, por eso el orden.
+    'tracking.middleware.LoginRequeridoMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'

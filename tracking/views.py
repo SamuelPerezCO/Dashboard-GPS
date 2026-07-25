@@ -8,14 +8,110 @@ la lógica de negocio en :mod:`tracking.services`.
 import logging
 import re
 
+from django.conf import settings
+from django.core.cache import cache
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.utils.crypto import constant_time_compare
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from . import api_client, services
+from .middleware import CLAVE_SESION, esta_autenticado
 
 logger = logging.getLogger(__name__)
 
 FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')  # Valida fechas en formato YYYY-MM-DD.
+
+# Freno al ensayo y error: tras MAX_INTENTOS fallos seguidos desde la misma IP
+# el login se bloquea BLOQUEO_SEGUNDOS. La contraseña es de 4 dígitos y el
+# sitio es público, así que sin esto se adivina en segundos.
+MAX_INTENTOS = 5
+BLOQUEO_SEGUNDOS = 60
+
+
+def _clave_intentos(request):
+    """Construye la clave de cache donde se cuentan los intentos fallidos.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        Cadena con la clave de cache, derivada de la IP de origen. Detrás
+        de un proxy (Render, Cloudflare) todas las peticiones comparten
+        IP, así que el freno pasa a ser global en vez de por visitante.
+    """
+    return f"login_intentos::{request.META.get('REMOTE_ADDR') or 'desconocida'}"
+
+
+def login_view(request):
+    """Muestra y procesa el formulario de acceso al dashboard.
+
+    Compara contra el usuario y la contraseña de settings
+    (``DASHBOARD_USER`` / ``DASHBOARD_PASSWORD``); no hay usuarios en
+    base de datos.
+
+    Args:
+        request: El HttpRequest entrante. En POST espera los campos
+            ``usuario``, ``clave`` y opcionalmente ``next``.
+
+    Returns:
+        HttpResponse con el formulario, o una redirección a ``next``
+        (o al dashboard) cuando las credenciales son correctas.
+    """
+    destino = request.POST.get('next') or request.GET.get('next') or ''
+    # Sin esta comprobación, un ?next=https://otro-sitio convertiría el login
+    # en un trampolín para llevar al usuario a una página ajena.
+    if not url_has_allowed_host_and_scheme(
+            destino, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        destino = reverse('tracking:dashboard')
+
+    if esta_autenticado(request):
+        return redirect(destino)
+
+    error = ''
+    if request.method == 'POST':
+        clave_intentos = _clave_intentos(request)
+        intentos = cache.get(clave_intentos, 0)
+        if intentos >= MAX_INTENTOS:
+            error = (f'Demasiados intentos fallidos. Espera {BLOQUEO_SEGUNDOS} '
+                     f'segundos y vuelve a intentarlo.')
+        else:
+            usuario = (request.POST.get('usuario') or '').strip()
+            clave = request.POST.get('clave') or ''
+            # constant_time_compare no delata la contraseña por el tiempo que
+            # tarda en responder. Se evalúan las dos para no cortar antes.
+            ok_usuario = constant_time_compare(usuario, settings.DASHBOARD_USER)
+            ok_clave = constant_time_compare(clave, settings.DASHBOARD_PASSWORD)
+            if ok_usuario and ok_clave:
+                cache.delete(clave_intentos)
+                # Renueva el identificador de sesión al entrar, para que una
+                # sesión creada antes del login no quede válida después.
+                request.session.cycle_key()
+                request.session[CLAVE_SESION] = True
+                return redirect(destino)
+            cache.set(clave_intentos, intentos + 1, BLOQUEO_SEGUNDOS)
+            error = 'Usuario o contraseña incorrectos.'
+
+    return render(request, 'tracking/login.html', {'error': error, 'next': destino})
+
+
+def logout_view(request):
+    """Cierra la sesión y devuelve al formulario de acceso.
+
+    Solo cierra la sesión por POST (el botón del encabezado, con su
+    token CSRF); así una imagen o un enlace de otra página no pueden
+    sacar al usuario del dashboard.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        Redirección a la página de login.
+    """
+    if request.method == 'POST':
+        request.session.flush()
+    return redirect('tracking:login')
 
 
 def dashboard(request):

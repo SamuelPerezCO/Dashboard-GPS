@@ -104,6 +104,14 @@ Contiene:
   }
   .marca-cliente .nombre { font-size: 15px; font-weight: 650; }
   #estado { color: var(--text-muted); font-size: 12px; }
+  /* Botón de cerrar sesión: discreto, para no competir con el menú. */
+  header .salir { display: flex; }
+  header .salir button {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-secondary); font: inherit; font-size: 13px; font-weight: 500;
+    padding: 6px 12px; cursor: pointer;
+  }
+  header .salir button:hover { background: var(--grid); color: var(--text-primary); }
   main { max-width: 1200px; margin: 0 auto; padding: 20px 24px 48px; }
 
   .aviso {
@@ -185,6 +193,11 @@ Contiene:
       <span class="tagline">Rastreo satelital</span>
     </div>
   </div>
+  {% comment %}
+  Todo lo que sigue solo tiene sentido con la sesión iniciada, así que va en
+  un bloque que login.html deja vacío.
+  {% endcomment %}
+  {% block barra %}
   <span class="divisor"></span>
   {# El menú solo muestra el dashboard principal; la vista de mapa sigue #}
   {# disponible escribiendo /mapa/ en el navegador (guardada para después). #}
@@ -195,6 +208,12 @@ Contiene:
     <span class="nombre">Expreso Brasilia</span>
     <span id="estado"></span>
   </div>
+  {# Por POST y con token CSRF: así nadie puede cerrarte la sesión desde fuera. #}
+  <form class="salir" method="post" action="{% url 'tracking:logout' %}">
+    {% csrf_token %}
+    <button type="submit">Salir</button>
+  </form>
+  {% endblock %}
 </header>
 <main>
   <div class="aviso" id="aviso"></div>
