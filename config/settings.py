@@ -33,7 +33,11 @@ SECRET_KEY = os.getenv(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DJANGO_DEBUG', '1') == '1'
+# Por defecto APAGADO: si en el servidor falta la variable, se cae del lado
+# seguro. Con DEBUG encendido, cualquier error muestra en pantalla el código y
+# las variables del proyecto, incluidas las credenciales del API. En local el
+# .env trae DJANGO_DEBUG=1, así que el desarrollo no cambia.
+DEBUG = os.getenv('DJANGO_DEBUG', '0') == '1'
 
 ALLOWED_HOSTS = [
     'localhost', '127.0.0.1',   # desarrollo local
@@ -74,6 +78,11 @@ SESSION_SAVE_EVERY_REQUEST = True
 # Fuera de desarrollo las cookies solo viajan por HTTPS.
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+
+# En Render el HTTPS lo termina el proxy y a Django le llega HTTP, así que sin
+# esto request.is_secure() sería siempre False y las cookies "secure" nunca se
+# enviarían. La cabecera la pone el propio proxy de Render.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 # Application definition

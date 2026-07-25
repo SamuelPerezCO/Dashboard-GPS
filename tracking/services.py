@@ -12,11 +12,45 @@ Combina los datos crudos del API de Service24GPS
 """
 
 import html
+import logging
 import re
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 from . import api_client
+
+logger = logging.getLogger(__name__)
+
+# Cuántas consultas al API se hacen a la vez.
+#
+# El grueso del tiempo de :func:`range_summary` son peticiones HTTP que se
+# pasan esperando: una por día para las alertas y otra por vehículo para las
+# timbradas. Cada una tarda ~0,8 s, así que en serie los 35 buses son ~30 s;
+# lanzadas de a 8 bajan a ~6 s. Se deja en 8 (y no en 35) para no abrir de
+# golpe una conexión por vehículo contra el WebService.
+HILOS_CONSULTA = 8
+
+
+def _en_paralelo(funcion, elementos):
+    """Aplica ``funcion`` a cada elemento usando varios hilos.
+
+    Solo se paralelizan las peticiones al API (que se van en espera de
+    red); las cuentas se siguen haciendo después, en un solo hilo y en
+    orden, para que el resultado no dependa de quién termine primero.
+
+    Args:
+        funcion: Función de un argumento a aplicar a cada elemento.
+        elementos: Secuencia de entradas.
+
+    Returns:
+        Lista con los resultados, en el mismo orden que ``elementos``.
+    """
+    elementos = list(elementos)
+    if not elementos:
+        return []
+    with ThreadPoolExecutor(max_workers=HILOS_CONSULTA) as pool:
+        return list(pool.map(funcion, elementos))
 
 
 def _hoy():
@@ -287,6 +321,46 @@ def _empresa_de_timbrada(hora, servicios_del_bus):
     return servicios_del_bus[-1][1] if servicios_del_bus else None
 
 
+def _timbradas_de_vehiculo(equipo, desde, hasta_efectivo, hoy,
+                           primer_dia_mes, dentro_del_mes):
+    """Lee las timbradas de un vehículo dentro del rango pedido.
+
+    Si el rango cabe en el mes en curso pide el mes completo (una sola
+    consulta, cacheada más tiempo) y lo recorta en memoria, en vez de
+    golpear el API con una consulta distinta por cada rango.
+
+    Un fallo del API se devuelve como tal en vez de propagarse: así una
+    unidad caída no tumba todo el dashboard, pero tampoco se confunde
+    con "esta unidad no tuvo pasajeros" (ver ``unidades_con_error`` en
+    :func:`range_summary`).
+
+    Args:
+        equipo: Identificador del equipo GPS (``idgps``).
+        desde: Fecha inicial del rango, en formato ``YYYY-MM-DD``.
+        hasta_efectivo: Fecha final del rango sin pasarse de hoy.
+        hoy: Fecha de hoy, en formato ``YYYY-MM-DD``.
+        primer_dia_mes: Primer día del mes en curso.
+        dentro_del_mes: True si el rango cabe dentro del mes en curso.
+
+    Returns:
+        Tupla ``(timbradas, fallo)``: la lista de eventos del rango y un
+        booleano que indica si la consulta al API falló.
+    """
+    if not equipo or hasta_efectivo < desde:
+        return [], False
+    try:
+        if dentro_del_mes:
+            del_mes = api_client.get_passenger_events(
+                equipo, primer_dia_mes, hoy, cache_ttl=1800)
+            return [e for e in del_mes if desde <= e['fecha'] <= hasta_efectivo], False
+        ttl = 600 if hasta_efectivo == hoy else 24 * 3600
+        return api_client.get_passenger_events(
+            equipo, desde, hasta_efectivo, cache_ttl=ttl), False
+    except api_client.ApiError:
+        logger.exception('No se pudieron leer las timbradas del equipo %s', equipo)
+        return [], True
+
+
 def _lista_dias(desde, hasta):
     """Genera la lista de fechas (inclusive) entre dos fechas dadas.
 
@@ -324,11 +398,16 @@ def range_summary(desde=None, hasta=None, empresa=None):
         empresa: Uno de los valores de :data:`EMPRESAS` para filtrar el
             resultado a una sola empresa, o None para incluir todas.
 
+    Las consultas al API (una por día y una por vehículo) se lanzan en
+    paralelo; las cuentas se hacen después, en orden, para que el
+    resultado sea siempre el mismo.
+
     Returns:
         Diccionario con el rango normalizado (``desde``, ``hasta``,
         ``hoy``), la empresa filtrada, los catálogos ``empresas`` y
         ``etiquetas``, el conteo de timbradas sin empresa inferida
-        (``timbradas_inferidas``), la ocupación promedio de la flota
+        (``timbradas_inferidas``), cuántas unidades no se pudieron leer
+        (``unidades_con_error``), la ocupación promedio de la flota
         (``ocupacion_flota``), la lista de vehículos con sus métricas
         (``vehiculos``) y el detalle diario por interno para graficar
         (``detalle``).
@@ -345,42 +424,36 @@ def range_summary(desde=None, hasta=None, empresa=None):
     hasta_efectivo = min(hasta, hoy)
     rango_dentro_del_mes = desde >= primer_dia_mes
 
+    # Un día = una consulta de alertas. Se piden todos a la vez y después se
+    # recorren en orden, para que el conteo no dependa de cuál llegue primero.
+    dias_consultables = [d for d in dias if d <= hoy]
+    servicios_por_dia = _en_paralelo(
+        lambda d: _servicios_del_dia(d, d == hoy), dias_consultables)
+
     servicios = Counter()
     servicios_bus_dia = defaultdict(list)
-    for d in dias:
-        if d > hoy:
-            continue
-        for s in _servicios_del_dia(d, d == hoy):
+    for d, servicios_del_dia in zip(dias_consultables, servicios_por_dia):
+        for s in servicios_del_dia:
             servicios_bus_dia[(s['equipo'], d)].append((s['hora'], s['empresa']))
             if empresa is None or tab_de_empresa(s['empresa']) == empresa:
                 servicios[s['equipo']] += 1
 
+    # Un vehículo = una consulta de timbradas; también en paralelo.
+    lecturas = _en_paralelo(
+        lambda veh: _timbradas_de_vehiculo(
+            veh.get('idgps'), desde, hasta_efectivo, hoy,
+            primer_dia_mes, rango_dentro_del_mes),
+        vehicles)
+
     vehiculos = []
     conteo_dia_interno = Counter()
     sin_empresa = 0
-    for veh in vehicles:
+    unidades_con_error = 0
+    for veh, (ev_rango, fallo) in zip(vehicles, lecturas):
         equipo = veh.get('idgps')
         interno = veh.get('nombre') or veh.get('patente') or ''
-
-        if not equipo or hasta_efectivo < desde:
-            ev_rango = []
-        elif rango_dentro_del_mes:
-            # El rango cabe en el mes actual: se pide el mes completo (una
-            # sola consulta, cacheada más tiempo) y se recorta en memoria,
-            # en vez de golpear el API con una consulta por cada rango.
-            try:
-                ev_mes = api_client.get_passenger_events(
-                    equipo, primer_dia_mes, hoy, cache_ttl=1800)
-            except api_client.ApiError:
-                ev_mes = []
-            ev_rango = [e for e in ev_mes if desde <= e['fecha'] <= hasta_efectivo]
-        else:
-            ttl = 600 if hasta_efectivo == hoy else 24 * 3600
-            try:
-                ev_rango = api_client.get_passenger_events(
-                    equipo, desde, hasta_efectivo, cache_ttl=ttl)
-            except api_client.ApiError:
-                ev_rango = []
+        if fallo:
+            unidades_con_error += 1
 
         emp_por_timbrada = [
             _empresa_de_timbrada(
@@ -426,6 +499,9 @@ def range_summary(desde=None, hasta=None, empresa=None):
         'empresas': list(EMPRESAS),
         'etiquetas': dict(ETIQUETA_EMPRESA),
         'timbradas_inferidas': sin_empresa,
+        # Unidades cuyas timbradas no se pudieron leer: sus cifras salen
+        # incompletas y el dashboard lo avisa en vez de mostrar un 0 limpio.
+        'unidades_con_error': unidades_con_error,
         'ocupacion_flota': ocupacion_flota,
         'vehiculos_en_promedio': len(porcentajes),
         'vehiculos': vehiculos,

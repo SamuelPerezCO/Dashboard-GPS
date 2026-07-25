@@ -41,8 +41,9 @@ Cómo funciona:
     /api/dashboard/?desde=...&hasta=...
  2. Con el JSON recibido dibuja las 3 gráficas (SVG generado aquí mismo,
     sin librerías) y llena la tabla de detalle.
- 3. La PRIMERA consulta es lenta (el servidor pregunta bus por bus al API
-    de rastreo); las siguientes salen del cache y son casi instantáneas.
+ 3. La PRIMERA consulta tarda (el servidor pregunta al API por cada día y por
+    cada bus, aunque lo hace en paralelo); las siguientes salen del cache y
+    son casi instantáneas.
 =============================================================================
 {% endcomment %}
 {% block title %}Dashboard — Rastrelital{% endblock %}
@@ -457,12 +458,12 @@ Cómo funciona:
     botonesRango.forEach(b => { b.disabled = true; });
     overlayMsg.textContent = `Consultando ${dias} ${dias === 1 ? 'día' : 'días'} de información…`;
     overlaySub.textContent = dias > DIAS_AVISO
-      ? 'Elegiste un rango de más de un mes: el API de rastreo exige 30 segundos ' +
-        'entre peticiones y se consulta bus por bus y día por día, así que la ' +
-        'primera vez puede tardar varios minutos. Las siguientes consultas del ' +
+      ? 'Elegiste un rango de más de un mes: se consulta un día de alertas por ' +
+        'cada fecha, más las timbradas de cada bus, así que la primera vez ' +
+        'puede tardar. Las siguientes consultas del ' +
         'mismo rango salen del cache y son casi instantáneas.'
-      : 'La primera consulta va bus por bus al API de rastreo y puede tardar ' +
-        'un poco; las siguientes salen del cache y son casi instantáneas.';
+      : 'La primera consulta pregunta al API por cada día y por cada bus; ' +
+        'las siguientes salen del cache y son casi instantáneas.';
     overlay.classList.add('visible');
     try {
       const url = '{% url "tracking:api_dashboard" %}' +
@@ -489,7 +490,17 @@ Cómo funciona:
       }
 
       if (data.error) { mostrarAviso(data.error); return; }
-      ocultarAviso();
+      // Si el API falló para algunas unidades, sus timbradas salen en 0 y eso
+      // se lee igual que "no llevó pasajeros". Hay que decirlo.
+      if (data.unidades_con_error) {
+        const n = data.unidades_con_error;
+        mostrarAviso(`Ojo: no se pudieron leer las timbradas de ${fmt(n)} ` +
+          `${n === 1 ? 'unidad' : 'unidades'}. Sus cifras salen incompletas ` +
+          `(aparecen con menos timbradas de las reales). Vuelve a consultar ` +
+          `para reintentar solo esas unidades.`);
+      } else {
+        ocultarAviso();
+      }
       datos = data;
       pintarTodo();
       document.getElementById('estado').textContent =
