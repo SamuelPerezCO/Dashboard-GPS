@@ -244,11 +244,15 @@ Cómo funciona:
   let datos = null;      // última respuesta del servidor (para repintar al cambiar tamaño)
   let empresa = '';      // pestaña activa; '' = Todas
 
-  // Rango inicial: últimos 7 días (incluyendo hoy).
+  // Rango inicial: el último mes, de hace 30 días a hoy (25/06 → 25/07 si
+  // hoy es 25/07). Es el MISMO rango que el login deja precalentando en el
+  // servidor mientras se escribe la contraseña (services.rango_ultimo_mes):
+  // si aquí se cambia el 30, hay que cambiarlo allá también, o la primera
+  // consulta dejará de encontrar el cache listo.
   const hoyLocal = new Date();
-  const hace6 = new Date(hoyLocal); hace6.setDate(hoyLocal.getDate() - 6);
+  const hace30 = new Date(hoyLocal); hace30.setDate(hoyLocal.getDate() - 30);
   inputHasta.value = hoyLocal.toLocaleDateString('sv-SE');   // 'sv-SE' da YYYY-MM-DD
-  inputDesde.value = hace6.toLocaleDateString('sv-SE');
+  inputDesde.value = hace30.toLocaleDateString('sv-SE');
 
   const ddmmaaaa = (f) => f.split('-').reverse().join('/');  // 2026-07-15 -> 15/07/2026
 

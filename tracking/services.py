@@ -9,6 +9,9 @@ Combina los datos crudos del API de Service24GPS
   empresa (PROCAPS, DITAR o RELIANZ) en un rango de fechas, inferida a
   partir de las alertas de entrada a geocerca y los eventos de
   timbrado (iButton) de cada unidad.
+* :func:`precalentar_ultimo_mes`: deja en cache, por adelantado, la
+  consulta del último mes con la que abre el dashboard. La lanza el
+  login en segundo plano mientras el usuario escribe su contraseña.
 """
 
 import html
@@ -512,3 +515,39 @@ def range_summary(desde=None, hasta=None, empresa=None):
                       for d in dias],
         },
     }
+
+
+# El "último mes" del dashboard: de hace 30 días a hoy (25/06 → 25/07 si hoy
+# es 25/07). El JavaScript de dashboard.html calcula este mismo rango para la
+# consulta inicial: si se cambia el 30 aquí, hay que cambiarlo allá también,
+# o el precalentamiento dejará de coincidir con lo que pide el navegador.
+DIAS_ULTIMO_MES = 30
+
+
+def rango_ultimo_mes():
+    """Calcula el rango del último mes: de hace 30 días a hoy.
+
+    Es el rango con el que abre el dashboard y el que el login deja
+    precalentado, así que ambos lados deben usar exactamente estas
+    fechas para que la consulta del navegador encuentre el cache listo.
+
+    Returns:
+        Tupla ``(desde, hasta)`` en formato ``YYYY-MM-DD``.
+    """
+    hoy = _hoy()
+    desde = (datetime.strptime(hoy, '%Y-%m-%d')
+             - timedelta(days=DIAS_ULTIMO_MES)).strftime('%Y-%m-%d')
+    return desde, hoy
+
+
+def precalentar_ultimo_mes():
+    """Deja en cache la consulta con la que abre el dashboard.
+
+    La lanza el login en un hilo aparte mientras el usuario escribe su
+    contraseña: la primera consulta del último mes tarda varios segundos
+    en frío, y así ya está lista —o muy avanzada— cuando la persona
+    termina de entrar. El resultado no se devuelve: lo único que importa
+    es que las consultas al API queden en el cache.
+    """
+    desde, hasta = rango_ultimo_mes()
+    range_summary(desde, hasta)

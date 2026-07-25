@@ -72,6 +72,17 @@ GPS_PASSWORD = os.getenv('GPS_PASSWORD', '')
 DASHBOARD_USER = os.getenv('DASHBOARD_USER', '1234')
 DASHBOARD_PASSWORD = os.getenv('DASHBOARD_PASSWORD', '1234')
 
+# La sesión viaja dentro de una cookie firmada, NO en la base de datos.
+#
+# Es lo que hace que este login no necesite base de datos ni "migrate": no hay
+# tabla django_session que crear. Lo único que se guarda es la marca de
+# "ya entró", y va firmada con SECRET_KEY, así que el navegador puede leerla
+# pero no puede inventarla.
+#
+# Por eso SECRET_KEY tiene que ser secreta de verdad en producción: quien la
+# sepa puede fabricarse una sesión válida.
+SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
+
 # La sesión dura una jornada de trabajo y se renueva en cada visita.
 SESSION_COOKIE_AGE = 12 * 60 * 60
 SESSION_SAVE_EVERY_REQUEST = True

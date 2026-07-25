@@ -68,7 +68,6 @@ nombre de la geocerca. No hay que tocar nada.
 python -m venv venv
 venv\Scripts\activate           # Windows
 pip install -r requirements.txt
-python manage.py migrate        # crea la tabla de sesiones (la usa el login)
 python manage.py runserver
 ```
 
@@ -103,13 +102,17 @@ El dashboard entero (páginas y endpoints JSON) exige iniciar sesión en
 variables de arriba. Tras 5 intentos fallidos desde la misma IP el login se
 bloquea 60 segundos. `/admin/` conserva su propio login de Django.
 
+Mientras el usuario escribe su contraseña, el servidor **precalienta en
+segundo plano** la consulta con la que abre el dashboard (el último mes), de
+modo que al entrar ya esté en cache.
+
 ## Pruebas
 
 ```bash
 python manage.py test
 ```
 
-37 pruebas que **no tocan la red**: el API se simula con `mock`, así que corren
+47 pruebas que **no tocan la red**: el API se simula con `mock`, así que corren
 sin credenciales y en un par de segundos.
 
 ---
@@ -117,12 +120,20 @@ sin credenciales y en un par de segundos.
 ## Rendimiento
 
 Una consulta hace una petición por cada día del rango (alertas) más una por cada
-bus (timbradas). Se lanzan **en paralelo** (8 a la vez), y todo se cachea:
+bus (timbradas). Se lanzan **en paralelo** (8 a la vez), y todo se cachea.
+
+El dashboard abre con el rango del **último mes** (de hace 30 días a hoy, por
+ejemplo 25/06 → 25/07), y ese mismo rango es el que el login precalienta
+mientras se escribe la contraseña — medido contra el API real:
 
 | | Tiempo |
 |---|---|
-| Primera consulta de 7 días (cache frío) | ~12 s |
-| La misma consulta, ya cacheada | ~0,25 s |
+| Último mes en frío (lo que tarda el precalentamiento) | ~21 s |
+| La misma consulta al entrar, ya precalentada | ~0,4 s |
+
+Si se cambia el rango inicial en `dashboard.html`, hay que cambiar también
+`DIAS_ULTIMO_MES` en `services.py`: si no coinciden exactamente, el
+precalentamiento deja de servir.
 
 Si el rango cabe en el mes en curso se pide el mes completo de una vez y se
 recorta en memoria, en vez de una consulta distinta por cada rango.
@@ -149,18 +160,26 @@ El dashboard de mapa en vivo existe en `/mapa/` pero no está en el menú.
 
 ## Despliegue (Render)
 
-El build debe correr:
+El build solo necesita:
 
 ```bash
 pip install -r requirements.txt
 python manage.py collectstatic --no-input
-python manage.py migrate          # imprescindible: el login usa sesiones en BD
 ```
 
-Y el entorno debe traer `DJANGO_SECRET_KEY`, las credenciales del GPS y
-`DASHBOARD_USER` / `DASHBOARD_PASSWORD`. Como `db.sqlite3` no se versiona y el
-disco de Render es efímero, la base se recrea en cada despliegue: eso solo
-significa que hay que volver a iniciar sesión.
+**No hace falta `migrate`.** El dashboard no guarda nada en base de datos: los
+datos vienen del API y la sesión del login viaja en una cookie firmada. El
+disco de Render es efímero, así que cualquier cosa escrita en `db.sqlite3` se
+perdería de todos modos.
+
+Variables de entorno que hay que poner en Render:
+
+| Variable | Por qué |
+|---|---|
+| `DJANGO_DEBUG` | **`0`.** Con `1`, cualquier error muestra el código, las variables locales y las credenciales a quien entre. |
+| `DJANGO_SECRET_KEY` | Firma la cookie de sesión. Si falta, se usa la clave de ejemplo que está en el repo y **cualquiera podría fabricarse una sesión válida**. |
+| `GPS_APIKEY`, `GPS_USERNAME`, `GPS_PASSWORD` | Acceso al WebService. |
+| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Acceso al dashboard (por defecto `1234`/`1234`). |
 
 ## Licencia
 

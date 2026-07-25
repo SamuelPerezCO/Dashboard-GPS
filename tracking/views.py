@@ -7,6 +7,7 @@ la lógica de negocio en :mod:`tracking.services`.
 
 import logging
 import re
+import threading
 
 from django.conf import settings
 from django.core.cache import cache
@@ -28,6 +29,52 @@ FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')  # Valida fechas en formato YYYY-M
 # sitio es público, así que sin esto se adivina en segundos.
 MAX_INTENTOS = 5
 BLOQUEO_SEGUNDOS = 60
+
+# --- Precalentamiento del dashboard ---------------------------------------
+# Mientras el usuario escribe su contraseña en /entrar/, un hilo aparte va
+# consultando el API con el rango con el que abre el dashboard (el último
+# mes, ver services.rango_ultimo_mes). Al entrar, esa primera consulta ya
+# está en cache y carga casi de inmediato en vez de tardar varios segundos.
+CLAVE_PRECALENTAMIENTO = 'precalentamiento_dashboard'
+# La marca vive el mismo tiempo que los datos que deja calientes (10 min):
+# precalentar más seguido no aporta nada, y de paso evita que cada visita
+# al login —o un bot que lo escanee— dispare consultas pesadas al API.
+PRECALENTAMIENTO_TTL = 600
+
+
+def _precalentar_dashboard():
+    """Corre el precalentamiento del dashboard; nunca deja escapar un error.
+
+    Vive en un hilo sin nadie que lo espere: si algo falla, solo queda en
+    el log y el dashboard consultará normal (sin cache adelantado).
+    """
+    try:
+        services.precalentar_ultimo_mes()
+    except api_client.ApiConfigError as exc:
+        # Sin credenciales (desarrollo recién clonado) no es un error grave.
+        logger.info('Precalentamiento omitido: %s', exc)
+    except Exception:
+        logger.exception('Falló el precalentamiento del dashboard')
+
+
+def _lanzar_precalentamiento():
+    """Arranca el precalentamiento en segundo plano, si toca.
+
+    ``cache.add`` es atómico: solo el primero que llegue pone la marca y
+    lanza el hilo; las demás visitas al login dentro de la ventana del
+    TTL no hacen nada. (El cache es por proceso, igual que el resto del
+    cacheo del proyecto: con el único worker de gunicorn en Render, el
+    hilo y las peticiones comparten memoria.)
+
+    Returns:
+        True si se lanzó un hilo nuevo; False si ya había un
+        precalentamiento reciente o en curso.
+    """
+    if not cache.add(CLAVE_PRECALENTAMIENTO, True, PRECALENTAMIENTO_TTL):
+        return False
+    threading.Thread(target=_precalentar_dashboard,
+                     name='precalentar-dashboard', daemon=True).start()
+    return True
 
 
 def _clave_intentos(request):
@@ -51,6 +98,10 @@ def login_view(request):
     (``DASHBOARD_USER`` / ``DASHBOARD_PASSWORD``); no hay usuarios en
     base de datos.
 
+    Al mostrar el formulario (GET) lanza además el precalentamiento del
+    dashboard en segundo plano: mientras la persona escribe su
+    contraseña, el servidor ya va consultando el último mes al API.
+
     Args:
         request: El HttpRequest entrante. En POST espera los campos
             ``usuario``, ``clave`` y opcionalmente ``next``.
@@ -68,6 +119,11 @@ def login_view(request):
 
     if esta_autenticado(request):
         return redirect(destino)
+
+    if request.method != 'POST':
+        # Mientras el usuario escribe su contraseña, el servidor va
+        # adelantando la consulta con la que abre el dashboard.
+        _lanzar_precalentamiento()
 
     error = ''
     if request.method == 'POST':

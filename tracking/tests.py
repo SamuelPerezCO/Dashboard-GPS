@@ -9,6 +9,7 @@ Ejecutar con::
     python manage.py test
 """
 
+from datetime import date, datetime
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -258,12 +259,104 @@ class RangeSummaryTests(TestCase):
                          ['2026-07-20', '2026-07-21', '2026-07-22'])
 
 
+class SinBaseDeDatosTests(TestCase):
+    """El login no puede depender de la base de datos.
+
+    En producción (Render) el build no corre ``migrate`` y el disco es
+    efímero, así que la tabla ``django_session`` no existe: guardar la
+    sesión en base de datos tumbaba el login entero con
+    ``OperationalError: no such table: django_session``.
+    """
+
+    def test_la_sesion_va_en_cookie_firmada(self):
+        from django.conf import settings
+        self.assertEqual(settings.SESSION_ENGINE,
+                         'django.contrib.sessions.backends.signed_cookies')
+
+    def test_entrar_no_escribe_en_la_base_de_datos(self):
+        """Iniciar sesión no debe ejecutar ni una sola consulta SQL."""
+        with self.assertNumQueries(0):
+            r = self.client.post(reverse('tracking:login'),
+                                 {'usuario': '1234', 'clave': '1234'})
+        self.assertEqual(r.status_code, 302)
+
+    def test_ver_el_dashboard_no_escribe_en_la_base_de_datos(self):
+        self.client.post(reverse('tracking:login'),
+                         {'usuario': '1234', 'clave': '1234'})
+        with self.assertNumQueries(0):
+            self.client.get(reverse('tracking:dashboard'))
+
+
+class PrecalentamientoTests(TestCase):
+    """El login precalienta la consulta inicial mientras escriben la clave."""
+
+    def setUp(self):
+        cache.clear()          # la marca de "ya se está precalentando" vive ahí
+        self.login_url = reverse('tracking:login')
+
+    def test_el_rango_es_el_ultimo_mes(self):
+        desde, hasta = services.rango_ultimo_mes()
+        d1 = datetime.strptime(desde, '%Y-%m-%d').date()
+        d2 = datetime.strptime(hasta, '%Y-%m-%d').date()
+        self.assertEqual(d2, date.today())
+        self.assertEqual((d2 - d1).days, services.DIAS_ULTIMO_MES)
+
+    def test_precalienta_exactamente_ese_rango(self):
+        """Si el rango difiere en un día, el cache no le sirve al navegador."""
+        with patch.object(services, 'range_summary') as resumen:
+            services.precalentar_ultimo_mes()
+        resumen.assert_called_once_with(*services.rango_ultimo_mes())
+
+    @patch.object(views, 'threading')
+    def test_el_get_del_login_lo_lanza_una_sola_vez(self, hilos):
+        self.client.get(self.login_url)
+        hilos.Thread.assert_called_once_with(
+            target=views._precalentar_dashboard,
+            name='precalentar-dashboard', daemon=True)
+        hilos.Thread.return_value.start.assert_called_once()
+        # Una segunda visita dentro de la ventana no lanza otro hilo.
+        self.client.get(self.login_url)
+        hilos.Thread.assert_called_once()
+
+    @patch.object(views, 'threading')
+    def test_el_post_no_lo_lanza(self, hilos):
+        self.client.post(self.login_url, {'usuario': 'x', 'clave': 'y'})
+        hilos.Thread.assert_not_called()
+
+    @patch.object(views, 'threading')
+    def test_con_sesion_iniciada_no_precalienta(self, hilos):
+        """Con sesión, /entrar/ redirige antes de llegar al precalentamiento."""
+        self.client.post(self.login_url, {'usuario': '1234', 'clave': '1234'})
+        self.client.get(self.login_url)
+        hilos.Thread.assert_not_called()
+
+    def test_un_fallo_no_se_escapa_del_hilo(self):
+        """El hilo corre sin nadie que lo espere: un error solo va al log."""
+        with patch.object(views.services, 'precalentar_ultimo_mes',
+                          side_effect=RuntimeError('boom')):
+            with self.assertLogs('tracking.views', level='ERROR'):
+                views._precalentar_dashboard()   # no debe lanzar excepción
+
+    def test_sin_credenciales_solo_se_anota(self):
+        with patch.object(views.services, 'precalentar_ultimo_mes',
+                          side_effect=views.api_client.ApiConfigError('faltan')):
+            with self.assertLogs('tracking.views', level='INFO') as log:
+                views._precalentar_dashboard()
+        self.assertIn('omitido', log.output[0])
+
+
 class LoginTests(TestCase):
     """El acceso al dashboard: quién entra, quién no y cómo se frena."""
 
     def setUp(self):
         cache.clear()          # el freno de intentos vive en el cache
         self.login_url = reverse('tracking:login')
+        # El GET del login lanza el precalentamiento en un hilo real que
+        # consultaría el API: aquí se anula para que la suite siga sin red.
+        parche = patch.object(views, '_lanzar_precalentamiento',
+                              return_value=False)
+        parche.start()
+        self.addCleanup(parche.stop)
 
     def test_sin_sesion_todo_redirige_al_login(self):
         for nombre in ('tracking:dashboard', 'tracking:fleet',
