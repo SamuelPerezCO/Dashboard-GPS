@@ -21,7 +21,8 @@ Contiene:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Rastreo Satelital{% endblock %}</title>
+<title>{% block title %}Rastrelital{% endblock %}</title>
+<link rel="icon" href="{% static 'tracking/logo.jpg' %}">
 <style>
   :root {
     color-scheme: light;
@@ -72,16 +73,23 @@ Contiene:
     border-bottom: 1px solid var(--border);
     position: sticky; top: 0; z-index: 1100;
   }
-  header h1 { font-size: 16px; margin: 0; font-weight: 650; }
-  /* Logo redondo, estilo foto de perfil: el JPG es cuadrado y se recorta en
-     círculo con border-radius + object-fit. El anillo lo separa del fondo. */
-  header .logo {
-    width: 40px; height: 40px; flex: none;
-    border-radius: 50%; object-fit: cover;
-    background: #fff;
-    box-shadow: 0 0 0 2px var(--page), 0 0 0 3px var(--series-1);
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  /* Marca de producto, estilo CRM: mosaico cuadrado de esquinas redondeadas
+     con el glifo del globo, y el nombre en texto al lado. Antes era el JPG
+     completo recortado en círculo con un anillo de color, que se leía como
+     foto de perfil de red social (y a 40px el texto del JPG no se distinguía).
+     El glifo va en SVG para que se vea nítido y funcione en tema claro y
+     oscuro; el JPG original quedó como favicon. */
+  header .logo-mark { display: flex; flex: none; }
+  header .logo-mark svg { display: block; }
+  header .marca { display: flex; align-items: center; gap: 10px; }
+  header .marca-texto { display: flex; flex-direction: column; line-height: 1.2; }
+  header .tagline {
+    color: var(--text-muted); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.02em;
   }
-  header .marca { display: flex; align-items: center; gap: 12px; }
+  /* Separador entre la marca y el menú, como en la barra de un CRM. */
+  header .divisor { width: 1px; height: 26px; background: var(--border); flex: none; }
   nav { display: flex; gap: 4px; }
   nav a {
     color: var(--text-secondary); text-decoration: none;
@@ -154,9 +162,30 @@ Contiene:
 <body>
 <header>
   <div class="marca">
-    <img class="logo" src="{% static 'tracking/logo.jpg' %}" alt="RTL Rastrelital">
-    <h1>Rastreo Satelital</h1>
+    {% comment %}
+    Glifo de marca: globo con meridianos, una simplificación del logo RTL
+    para que se lea bien a 34px. Decorativo: el nombre va en el <h1>.
+    {% endcomment %}
+    <span class="logo-mark" aria-hidden="true">
+      <svg viewBox="0 0 34 34" width="34" height="34">
+        <linearGradient id="marca-rtl" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#3d8de9"/>
+          <stop offset="1" stop-color="#153c74"/>
+        </linearGradient>
+        <rect width="34" height="34" rx="9" fill="url(#marca-rtl)"/>
+        <g fill="none" stroke="#fff" stroke-width="1.5">
+          <circle cx="17" cy="17" r="8"/>
+          <ellipse cx="17" cy="17" rx="8" ry="3.3"/>
+          <ellipse cx="17" cy="17" rx="3.3" ry="8"/>
+        </g>
+      </svg>
+    </span>
+    <div class="marca-texto">
+      <h1>Rastrelital</h1>
+      <span class="tagline">Rastreo satelital</span>
+    </div>
   </div>
+  <span class="divisor"></span>
   {# El menú solo muestra el dashboard principal; la vista de mapa sigue #}
   {# disponible escribiendo /mapa/ en el navegador (guardada para después). #}
   <nav>

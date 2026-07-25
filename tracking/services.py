@@ -6,7 +6,7 @@ Combina los datos crudos del API de Service24GPS
 * :func:`fleet_summary`: estado en vivo de toda la flota (posición,
   velocidad, ignición, etc.), usado por el mapa en tiempo real.
 * :func:`range_summary`: ocupación de pasajeros por unidad y por
-  empresa (PROCAPS o DITAR/RELIANZ) en un rango de fechas, inferida a
+  empresa (PROCAPS, DITAR o RELIANZ) en un rango de fechas, inferida a
   partir de las alertas de entrada a geocerca y los eventos de
   timbrado (iButton) de cada unidad.
 """
@@ -56,23 +56,35 @@ _CAPACIDAD_CRUDA = {
 CAPACIDAD_POR_INTERNO = {_norm_interno(k): v for k, v in _CAPACIDAD_CRUDA.items()}
 
 
-# Empresas que se muestran como pestañas/filtros en el dashboard. DITAR y
-# RELIANZ se agrupan bajo una sola pestaña porque comparten geocercas.
-EMPRESAS = ('PROCAPS', 'DITAR-RELIANZ')
+# Pestaña donde caen los servicios y timbradas que no se pueden atribuir a
+# ninguna empresa: o el bus no registró entrada a ninguna geocerca ese día, o
+# entró a una cuyo nombre no corresponde a ninguna empresa conocida.
+TAB_SIN_IDENTIFICAR = 'SIN-IDENTIFICAR'
+
+# Empresas que se muestran como pestañas/filtros en el dashboard. Cada empresa
+# tiene su propia pestaña; la última recoge todo lo no atribuible.
+EMPRESAS = ('PROCAPS', 'DITAR', 'RELIANZ', TAB_SIN_IDENTIFICAR)
 
 # Etiqueta legible para cada valor de EMPRESAS.
 ETIQUETA_EMPRESA = {
     'PROCAPS': 'PROCAPS',
-    'DITAR-RELIANZ': 'DITAR / RELIANZ',
+    'DITAR': 'DITAR',
+    'RELIANZ': 'RELIANZ',
+    TAB_SIN_IDENTIFICAR: 'Sin identificar',
 }
 
 # Patrones para inferir la empresa dueña de una geocerca a partir de su
 # nombre. El API no expone un campo de "cliente": la única pista es el
 # nombre de la geocerca (ver memoria "Empresa solo en nombre de geocerca").
+# Se evalúan con re.search y en orden, así que el primero que coincida gana:
+# PROCAPS va anclado con ^ porque "RUTA <n>" solo vale al inicio del nombre,
+# mientras que DITAR y RELIANZ se aceptan en cualquier parte del nombre
+# ("BODEGA DITAR", "RELIANZ PLANTA 2") para no depender de cómo se bauticen
+# sus geocercas cuando se creen.
 _PATRON_EMPRESA = (
     ('PROCAPS', re.compile(r'^(?:PROCAPS|RUTA\s*\d+)', re.IGNORECASE)),
-    ('DITAR',   re.compile(r'^DITAR', re.IGNORECASE)),
-    ('RELIANZ', re.compile(r'^RELIANZ', re.IGNORECASE)),
+    ('DITAR',   re.compile(r'\bDITAR\b', re.IGNORECASE)),
+    ('RELIANZ', re.compile(r'\bRELIANZ\b', re.IGNORECASE)),
 )
 
 # Extrae el nombre de la geocerca del texto de una alerta, con el formato
@@ -110,7 +122,7 @@ def empresa_de_geocerca(nombre):
     """
     nombre = (nombre or '').strip()
     for empresa, patron in _PATRON_EMPRESA:
-        if patron.match(nombre):
+        if patron.search(nombre):
             return empresa
     return None
 
@@ -118,17 +130,18 @@ def empresa_de_geocerca(nombre):
 def tab_de_empresa(empresa):
     """Mapea una empresa concreta a su pestaña/filtro en el dashboard.
 
-    DITAR y RELIANZ comparten una sola pestaña (``'DITAR-RELIANZ'``);
-    cualquier otro valor cae en la pestaña de PROCAPS.
+    Cada empresa conocida tiene su propia pestaña. Lo que no se pudo
+    atribuir a ninguna (None) cae en :data:`TAB_SIN_IDENTIFICAR`, para
+    que no desaparezca del dashboard.
 
     Args:
         empresa: Valor devuelto por :func:`empresa_de_geocerca`
             (``'PROCAPS'``, ``'DITAR'``, ``'RELIANZ'`` o None).
 
     Returns:
-        ``'PROCAPS'`` o ``'DITAR-RELIANZ'``.
+        Uno de los valores de :data:`EMPRESAS`.
     """
-    return 'PROCAPS' if empresa == 'PROCAPS' else 'DITAR-RELIANZ'
+    return empresa if empresa in EMPRESAS else TAB_SIN_IDENTIFICAR
 
 
 def fleet_summary():

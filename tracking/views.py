@@ -21,13 +21,20 @@ FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')  # Valida fechas en formato YYYY-M
 def dashboard(request):
     """Renderiza la página principal del dashboard de ocupación.
 
+    Pasa el catálogo de empresas para que las pestañas se dibujen a
+    partir de :data:`tracking.services.EMPRESAS` y no haya que
+    mantener la misma lista duplicada en la plantilla.
+
     Args:
         request: El HttpRequest entrante.
 
     Returns:
         HttpResponse con la plantilla ``tracking/dashboard.html``.
     """
-    return render(request, 'tracking/dashboard.html')
+    return render(request, 'tracking/dashboard.html', {
+        'empresas': [{'valor': e, 'etiqueta': services.ETIQUETA_EMPRESA[e]}
+                     for e in services.EMPRESAS],
+    })
 
 
 def fleet_dashboard(request):
