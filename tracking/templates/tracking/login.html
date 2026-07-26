@@ -16,6 +16,10 @@ cliente del encabezado: todavía no hay nadie dentro.
 {# Sin sesión no hay menú, ni cliente, ni botón de salir: solo la marca. #}
 {% block barra %}{% endblock %}
 
+{# Tampoco hay pestaña que vigilar: aquí es donde se entra. Dejar el guardia
+   activo sería pedirle cerrar una sesión que no existe, una y otra vez. #}
+{% block guardia_pestana %}{% endblock %}
+
 {% block head %}
 <style>
   /* Tarjeta centrada en la parte alta de la página, no en el medio: así no

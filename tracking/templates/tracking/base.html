@@ -165,6 +165,50 @@ Contiene:
   #tooltip .t-row { color: var(--text-secondary); }
   #tooltip .t-row b { color: var(--text-primary); font-weight: 650; }
 </style>
+{% comment %}
+Guardia de pestaña: cerrar la pestaña tiene que pedir usuario y contraseña otra
+vez. La cookie de sesión no sirve para eso —es del navegador entero y sobrevive
+a cerrar la pestaña—, así que la pestaña se marca aparte en sessionStorage, que
+es lo único que el navegador borra justo cuando la pestaña desaparece.
+
+  - Se entra por el formulario  -> el servidor manda "sesion_nueva" y la
+    pestaña queda sellada.
+  - Recargar o navegar dentro de la misma pestaña -> el sello sigue ahí.
+  - Pestaña nueva (o reabierta) sobre una cookie que todavía valía -> no hay
+    sello: se cierra la sesión en el servidor y se vuelve al formulario.
+
+Va en el <head> y antes que nada para que el dashboard no alcance a pintarse en
+una pestaña que va a rebotar al login. login.html deja este bloque vacío: ahí no
+hay sesión que vigilar y cerrarla otra vez sería un ciclo infinito.
+{% endcomment %}
+{% block guardia_pestana %}
+<script>
+  (function () {
+    var SELLO = 'rastrelital_pestana';
+    // Si sessionStorage no se puede tocar (modos de privacidad que lo bloquean)
+    // no hay forma de reconocer la pestaña. Se deja pasar en vez de arriesgar
+    // un ciclo de cierres de sesión que dejaría el dashboard inservible.
+    var almacen;
+    try {
+      almacen = window.sessionStorage;
+      almacen.getItem(SELLO);
+    } catch (e) { return; }
+
+    if ({{ sesion_nueva|yesno:"true,false" }}) { almacen.setItem(SELLO, '1'); return; }
+    if (almacen.getItem(SELLO)) { return; }
+
+    document.documentElement.style.visibility = 'hidden';
+    // Cerrar de verdad, no solo mandar al login: mientras la cookie siga
+    // firmada y viva, el propio login redirige de vuelta al dashboard.
+    fetch('{% url "tracking:logout" %}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+    }).finally(function () {
+      location.replace('{% url "tracking:login" %}');
+    });
+  })();
+</script>
+{% endblock %}
 {% block head %}{% endblock %}
 </head>
 <body>

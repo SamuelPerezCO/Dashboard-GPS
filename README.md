@@ -102,6 +102,15 @@ El dashboard entero (páginas y endpoints JSON) exige iniciar sesión en
 variables de arriba. Tras 5 intentos fallidos desde la misma IP el login se
 bloquea 60 segundos. `/admin/` conserva su propio login de Django.
 
+**La sesión dura lo que dure la pestaña.** Al cerrarla (o cerrar el navegador)
+hay que volver a escribir usuario y contraseña; recargar o navegar dentro de la
+misma pestaña no molesta. Son dos piezas: la cookie va sin fecha de vencimiento
+(`SESSION_EXPIRE_AT_BROWSER_CLOSE`), y el bloque `guardia_pestana` de
+`base.html` sella la pestaña en `sessionStorage`, que es lo único que el
+navegador borra al cerrarla. Consecuencia a tener en cuenta: **abrir el
+dashboard en una segunda pestaña cierra la sesión de las dos**, porque la
+pestaña nueva no trae sello y no hay forma de distinguirla de una reabierta.
+
 Mientras el usuario escribe su contraseña, el servidor **precalienta en
 segundo plano** las consultas al API del último mes, para adelantar trabajo
 antes de que la persona elija un rango.

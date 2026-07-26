@@ -18,7 +18,7 @@ from django.utils.crypto import constant_time_compare
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from . import api_client, services
-from .middleware import CLAVE_SESION, esta_autenticado
+from .middleware import CLAVE_LOGIN_NUEVO, CLAVE_SESION, esta_autenticado
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +146,8 @@ def login_view(request):
                 # sesión creada antes del login no quede válida después.
                 request.session.cycle_key()
                 request.session[CLAVE_SESION] = True
+                # La página a la que se llega ahora es la que sella la pestaña.
+                request.session[CLAVE_LOGIN_NUEVO] = True
                 return redirect(destino)
             cache.set(clave_intentos, intentos + 1, BLOQUEO_SEGUNDOS)
             error = 'Usuario o contraseña incorrectos.'
@@ -171,6 +173,23 @@ def logout_view(request):
     return redirect('tracking:login')
 
 
+def _sesion_nueva(request):
+    """Consume la marca que deja el login y dice si es la página de entrada.
+
+    Es de un solo uso a propósito: la gasta la primera página que se
+    pinta después de entrar, que es la que sella su pestaña. Cualquier
+    otra carga posterior —una recarga, otra pestaña, otro día— ya la
+    encuentra vacía y tiene que demostrar el sello por su cuenta.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        True solo la primera vez que se pinta una página tras el login.
+    """
+    return bool(request.session.pop(CLAVE_LOGIN_NUEVO, False))
+
+
 def dashboard(request):
     """Renderiza la página principal del dashboard de ocupación.
 
@@ -187,6 +206,7 @@ def dashboard(request):
     return render(request, 'tracking/dashboard.html', {
         'empresas': [{'valor': e, 'etiqueta': services.ETIQUETA_EMPRESA[e]}
                      for e in services.EMPRESAS],
+        'sesion_nueva': _sesion_nueva(request),
     })
 
 
@@ -199,7 +219,9 @@ def fleet_dashboard(request):
     Returns:
         HttpResponse con la plantilla ``tracking/fleet.html``.
     """
-    return render(request, 'tracking/fleet.html')
+    return render(request, 'tracking/fleet.html', {
+        'sesion_nueva': _sesion_nueva(request),
+    })
 
 
 def _json_api(build):

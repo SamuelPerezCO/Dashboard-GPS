@@ -86,6 +86,16 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 # La sesión dura una jornada de trabajo y se renueva en cada visita.
 SESSION_COOKIE_AGE = 12 * 60 * 60
 SESSION_SAVE_EVERY_REQUEST = True
+
+# La cookie se manda sin fecha de vencimiento, así que el navegador la borra al
+# cerrarse. Es la mitad servidor de "cerrar y volver a entrar pide contraseña":
+# funciona aunque el navegador no ejecute JavaScript. La otra mitad —cerrar solo
+# la pestaña, con el navegador abierto, que la cookie no distingue— la pone el
+# guardia de pestaña de tracking/base.html.
+#
+# SESSION_COOKIE_AGE sigue contando: el backend de cookies firmadas valida la
+# antigüedad de la firma al leerla, así que el tope de 12 h se respeta igual.
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 # Fuera de desarrollo las cookies solo viajan por HTTPS.
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG

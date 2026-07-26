@@ -14,6 +14,15 @@ from django.urls import reverse
 # Marca que se guarda en la sesión cuando el login fue correcto.
 CLAVE_SESION = 'dashboard_autenticado'
 
+# Marca de un solo uso que el login deja puesta para la PRIMERA página que se
+# pinte después de entrar. La cookie de sesión la comparten todas las pestañas
+# del navegador, así que por sí sola no distingue "la pestaña donde entré" de
+# "una pestaña nueva abierta mañana sobre la misma cookie". Esta marca es la que
+# permite hacer esa diferencia: la página que la recibe sella su pestaña en
+# sessionStorage (que sí muere con la pestaña), y una pestaña sin sello cierra
+# la sesión sola. Ver el bloque "guardia_pestana" de tracking/base.html.
+CLAVE_LOGIN_NUEVO = 'login_recien_hecho'
+
 
 def esta_autenticado(request):
     """Indica si la petición viene de una sesión que ya inició sesión.

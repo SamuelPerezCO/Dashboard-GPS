@@ -13,7 +13,7 @@ from datetime import date, datetime
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from . import services, views
@@ -421,6 +421,85 @@ class LoginTests(TestCase):
         """El middleware no debe secuestrar /admin/, que ya se autentica solo."""
         r = self.client.get('/admin/')
         self.assertNotIn(self.login_url, r.headers.get('Location', ''))
+
+
+class PestanaTests(TestCase):
+    """Cerrar la pestaña tiene que volver a pedir usuario y contraseña.
+
+    La cookie de sesión no alcanza para eso: la comparten todas las
+    pestañas del navegador y sobrevive a cerrar una. Por eso el login
+    marca la primera página que se pinta (``sesion_nueva``), esa página
+    sella su pestaña en sessionStorage, y una pestaña sin sello cierra la
+    sesión sola. Aquí se prueba la mitad servidor; la del navegador es el
+    bloque "guardia_pestana" de base.html.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.login_url = reverse('tracking:login')
+        parche = patch.object(views, '_lanzar_precalentamiento',
+                              return_value=False)
+        parche.start()
+        self.addCleanup(parche.stop)
+
+    def entrar(self):
+        self.client.post(self.login_url, {'usuario': '1234', 'clave': '1234'})
+
+    def test_la_pagina_de_entrada_sella_la_pestana(self):
+        self.entrar()
+        r = self.client.get(reverse('tracking:dashboard'))
+        self.assertTrue(r.context['sesion_nueva'])
+        self.assertContains(r, 'rastrelital_pestana')
+
+    def test_el_sello_es_de_un_solo_uso(self):
+        """La segunda carga ya es "otra pestaña" mientras no muestre el sello."""
+        self.entrar()
+        self.client.get(reverse('tracking:dashboard'))
+        r = self.client.get(reverse('tracking:dashboard'))
+        self.assertFalse(r.context['sesion_nueva'])
+
+    def test_el_mapa_tambien_sella_al_entrar_directo(self):
+        """Con ?next=/mapa/ la página de entrada es el mapa, no el dashboard."""
+        destino = reverse('tracking:fleet')
+        self.client.post(self.login_url,
+                         {'usuario': '1234', 'clave': '1234', 'next': destino})
+        r = self.client.get(destino)
+        self.assertTrue(r.context['sesion_nueva'])
+
+    def test_el_login_no_lleva_guardia(self):
+        """Vigilar la pestaña en el propio login sería un ciclo de cierres."""
+        r = self.client.get(self.login_url)
+        self.assertNotContains(r, 'rastrelital_pestana')
+
+    def test_el_cierre_de_la_guardia_pasa_el_csrf(self):
+        """El fetch del guardia manda el token por cabecera y debe ser aceptado.
+
+        Si el CSRF lo rechazara, la sesión quedaría viva: el rebote al
+        login volvería al dashboard, el guardia dispararía otra vez y la
+        página entraría en un ciclo sin fin en vez de pedir la clave.
+        """
+        cliente = Client(enforce_csrf_checks=True)
+        cliente.get(self.login_url)      # deja la cookie csrftoken
+        cliente.post(self.login_url, {
+            'usuario': '1234', 'clave': '1234',
+            'csrfmiddlewaretoken': cliente.cookies['csrftoken'].value})
+        self.assertTrue(cliente.session.get(CLAVE_SESION))
+
+        r = cliente.post(reverse('tracking:logout'),
+                         HTTP_X_CSRFTOKEN=cliente.cookies['csrftoken'].value)
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(cliente.session.get(CLAVE_SESION))
+
+    def test_la_cookie_muere_al_cerrar_el_navegador(self):
+        """Sin fecha de vencimiento el navegador la borra al cerrarse.
+
+        Es el respaldo de la guardia de pestaña para quien no ejecute
+        JavaScript.
+        """
+        self.entrar()
+        cookie = self.client.cookies['sessionid']
+        self.assertEqual(cookie['max-age'], '')
+        self.assertEqual(cookie['expires'], '')
 
 
 class DashboardTests(TestCase):
