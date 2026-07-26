@@ -278,7 +278,28 @@ Cómo funciona:
 
   const ddmmaaaa = (f) => f.split('-').reverse().join('/');  // 2026-07-15 -> 15/07/2026
 
-  const fechasListas = () => Boolean(inputDesde.value && inputHasta.value);
+  // Hoy, en la zona horaria del navegador y en el formato que usan los inputs
+  // (YYYY-MM-DD). 'sv-SE' da justo ese formato; toISOString() no serviría
+  // porque pasa a UTC y en Colombia adelantaría el día desde las 7 p.m.
+  const hoy = () => new Date().toLocaleDateString('sv-SE');
+
+  // Al futuro no se le puede preguntar: el API solo tiene días que ya pasaron,
+  // así que el último día elegible es hoy —el día de quien está usando la
+  // página, no el del servidor—. El 'max' apaga del calendario los días
+  // siguientes; se vuelve a fijar al abrirlo por si la pestaña quedó abierta y
+  // cruzó la medianoche.
+  function fijarTopeHoy() {
+    inputDesde.max = inputHasta.max = hoy();
+  }
+  fijarTopeHoy();
+
+  // Rango completo y dentro de lo consultable. Lo segundo cubre a quien escriba
+  // la fecha a mano en vez de usar el calendario: ahí el navegador marca el
+  // campo como inválido pero igual dispara 'change', y sin este chequeo se iría
+  // una consulta —cara, muchas peticiones al API— por días que aún no existen.
+  const fechasListas = () =>
+    Boolean(inputDesde.value && inputHasta.value) &&
+    inputDesde.value <= hoy() && inputHasta.value <= hoy();
 
   /*
    * Dibuja una gráfica SVG dentro de "cont".
@@ -650,6 +671,11 @@ Cómo funciona:
     if (fechasListas()) cargar();
     else if (!datos) estadoSinFechas();
   }));
+
+  // El tope de "hasta hoy" se recalcula justo antes de abrir el calendario
+  // (ver fijarTopeHoy): así un dashboard que llevaba días abierto no se queda
+  // ofreciendo el de ayer como último día.
+  [inputDesde, inputHasta].forEach(input => input.addEventListener('focus', fijarTopeHoy));
 
   // Atajos de rango: cuentan hacia atrás desde hoy (7 y 30 días, hoy incluido)
   // y consultan de una vez. Poner el valor por código no dispara 'change', así
