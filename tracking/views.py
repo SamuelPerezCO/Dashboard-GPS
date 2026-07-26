@@ -32,9 +32,10 @@ BLOQUEO_SEGUNDOS = 60
 
 # --- Precalentamiento del dashboard ---------------------------------------
 # Mientras el usuario escribe su contraseña en /entrar/, un hilo aparte va
-# consultando el API con el rango con el que abre el dashboard (el último
-# mes, ver services.rango_ultimo_mes). Al entrar, esa primera consulta ya
-# está en cache y carga casi de inmediato en vez de tardar varios segundos.
+# consultando el API por el último mes (ver services.rango_ultimo_mes). El
+# dashboard abre sin fechas —las elige el usuario—, así que esto no adelanta
+# una consulta concreta sino sus piezas: las alertas quedan cacheadas día por
+# día, que es lo caro, y el rango que se pida después ya las encuentra listas.
 CLAVE_PRECALENTAMIENTO = 'precalentamiento_dashboard'
 # La marca vive el mismo tiempo que los datos que deja calientes (10 min):
 # precalentar más seguido no aporta nada, y de paso evita que cada visita

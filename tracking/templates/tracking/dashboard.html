@@ -37,11 +37,15 @@ el código, basta con que la geocerca lleve el nombre de la empresa.
 
 Todas las gráficas tienen el número interno del vehículo en el eje X.
 Cómo funciona:
- 1. Al cargar (o al presionar "Consultar") el JS llama a
-    /api/dashboard/?desde=...&hasta=...
- 2. Con el JSON recibido dibuja las 3 gráficas (SVG generado aquí mismo,
+ 1. La página abre SIN fechas y sin consultar nada: las gráficas muestran
+    "Selecciona las fechas". Quien decide qué rango se le pide al API es el
+    usuario, no la página.
+ 2. Apenas están puestas las dos fechas —o al presionar "Consultar" o un
+    atajo de rango— el JS llama a /api/dashboard/?desde=...&hasta=... y el
+    texto de cada gráfica se convierte en un spinner.
+ 3. Con el JSON recibido dibuja las 4 gráficas (SVG generado aquí mismo,
     sin librerías) y llena la tabla de detalle.
- 3. La PRIMERA consulta tarda (el servidor pregunta al API por cada día y por
+ 4. La PRIMERA consulta tarda (el servidor pregunta al API por cada día y por
     cada bus, aunque lo hace en paralelo); las siguientes salen del cache y
     son casi instantáneas.
 =============================================================================
@@ -81,6 +85,9 @@ Cómo funciona:
     border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
     font: inherit;
   }
+  /* Las fechas también se bloquean mientras se consulta: cambiarlas a media
+     consulta dejaría el filtro diciendo una cosa y las gráficas otra. */
+  .filtros input[type=date]:disabled { opacity: 0.6; cursor: wait; }
   .filtros button {
     background: var(--series-1); color: #fff; border: none; border-radius: 6px;
     padding: 7px 14px; font: inherit; font-weight: 550; cursor: pointer;
@@ -107,23 +114,36 @@ Cómo funciona:
   .tile-flota .sub { color: var(--text-muted); font-size: 11px; }
   @media (max-width: 760px) { .tile-flota { margin-left: 0; text-align: left; } }
 
-  /* --- overlay de carga: spinner grande centrado sobre toda la página --- */
-  #overlay-carga {
-    display: none; position: fixed; inset: 0; z-index: 1500;
-    flex-direction: column; align-items: center; justify-content: center;
-    gap: 20px; text-align: center; padding: 24px;
-    background: color-mix(in srgb, var(--page) 78%, transparent);
-    backdrop-filter: blur(2px);
+  /* --- aviso de espera: una sola línea debajo de los filtros ---
+     Explica por qué la primera consulta puede tardar. Va aquí, y no dentro de
+     cada tarjeta, para no repetir el mismo párrafo cuatro veces. */
+  .nota-carga {
+    display: none;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 16px;
+    color: var(--text-secondary); font-size: 13px;
   }
-  #overlay-carga.visible { display: flex; }
-  #overlay-carga .spinner {
-    width: 76px; height: 76px; border-radius: 50%;
-    border: 7px solid var(--grid); border-top-color: var(--series-1);
+  .nota-carga.visible { display: block; }
+  .nota-carga b { color: var(--text-primary); }
+
+  /* --- estado de las gráficas mientras no hay datos ---
+     El hueco de cada gráfica no arranca vacío: primero invita a elegir las
+     fechas y, mientras se consulta el API, ese mismo texto se convierte en el
+     spinner. Mide lo mismo que el SVG (H = 320) para que la página no dé un
+     salto cuando llegan los datos. */
+  .estado-viz {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; height: 320px; text-align: center; padding: 0 12px;
+  }
+  .estado-viz .icono { color: var(--text-muted); opacity: 0.8; }
+  .estado-viz .titulo { color: var(--text-secondary); font-size: 13px; font-weight: 550; }
+  .estado-viz .sub { color: var(--text-muted); font-size: 12px; max-width: 260px; }
+  .estado-viz .spinner {
+    width: 42px; height: 42px; border-radius: 50%;
+    border: 4px solid var(--grid); border-top-color: var(--series-1);
     animation: girar 0.9s linear infinite;
   }
   @keyframes girar { to { transform: rotate(360deg); } }
-  #overlay-carga .msg { font-size: 15px; font-weight: 550; max-width: 460px; }
-  #overlay-carga .sub { color: var(--text-secondary); font-size: 13px; max-width: 460px; }
 
   /* Rejilla de 2 columnas (Servicios|Timbradas); el detalle por día queda
      solo, a lo ancho, debajo.
@@ -170,13 +190,17 @@ Cómo funciona:
 
 <div class="nota-vacia" id="nota-vacia"></div>
 
-<!-- Encabezado del boceto: Desde DD/MM/AAAA hasta DD/MM/AAAA -->
+<!-- Encabezado del boceto: Desde DD/MM/AAAA hasta DD/MM/AAAA.
+     Las dos fechas abren vacías: la primera consulta al API la decide el
+     usuario. "Consultar" nace deshabilitado y se habilita cuando hay rango
+     (lo hace el JS, pero el atributo va aquí para que ya salga bien en el
+     primer pintado, antes de que corra el script). -->
 <div class="filtros">
   <label for="desde">Desde</label>
   <input type="date" id="desde">
   <label for="hasta">hasta</label>
   <input type="date" id="hasta">
-  <button id="btn-consultar">Consultar</button>
+  <button id="btn-consultar" disabled>Consultar</button>
   <span class="sep"></span>
   <button class="rango" data-dias="7">Última semana</button>
   <button class="rango" data-dias="30">Último mes</button>
@@ -188,12 +212,9 @@ Cómo funciona:
   </div>
 </div>
 
-<!-- Spinner grande que cubre la página mientras se consulta el API -->
-<div id="overlay-carga">
-  <div class="spinner"></div>
-  <div class="msg" id="overlay-msg">Consultando…</div>
-  <div class="sub" id="overlay-sub"></div>
-</div>
+<!-- Aviso de espera: aparece solo mientras se consulta el API. El spinner
+     está dentro de cada gráfica; esto explica la demora una sola vez. -->
+<div class="nota-carga" id="nota-carga"></div>
 
 <div class="grid-2">
 <div class="card">
@@ -227,7 +248,7 @@ Cómo funciona:
   <div class="scroll-x">
     <table id="tabla-detalle">
       <thead></thead>
-      <tbody><tr><td class="muted">Sin datos todavía.</td></tr></tbody>
+      <tbody><tr><td class="muted">Selecciona las fechas para ver el detalle.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -240,21 +261,24 @@ Cómo funciona:
   const btn = document.getElementById('btn-consultar');
   const tabs = document.getElementById('tabs-empresa');
   const notaVacia = document.getElementById('nota-vacia');
+  const notaCarga = document.getElementById('nota-carga');
   const botonesRango = document.querySelectorAll('.filtros button.rango');
+  const contenedoresViz = document.querySelectorAll('.viz');  // los 4 huecos de gráfica
   let datos = null;      // última respuesta del servidor (para repintar al cambiar tamaño)
   let empresa = '';      // pestaña activa; '' = Todas
+  let cargando = false;  // hay una consulta en curso (evita pedir dos veces lo mismo)
 
-  // Rango inicial: el último mes, de hace 30 días a hoy (25/06 → 25/07 si
-  // hoy es 25/07). Es el MISMO rango que el login deja precalentando en el
-  // servidor mientras se escribe la contraseña (services.rango_ultimo_mes):
-  // si aquí se cambia el 30, hay que cambiarlo allá también, o la primera
-  // consulta dejará de encontrar el cache listo.
-  const hoyLocal = new Date();
-  const hace30 = new Date(hoyLocal); hace30.setDate(hoyLocal.getDate() - 30);
-  inputHasta.value = hoyLocal.toLocaleDateString('sv-SE');   // 'sv-SE' da YYYY-MM-DD
-  inputDesde.value = hace30.toLocaleDateString('sv-SE');
+  // Las dos fechas abren VACÍAS y la página no consulta nada sola. Cada
+  // consulta cuesta muchas peticiones al API (una por día + una por bus), así
+  // que no se gasta ninguna en un rango que nadie pidió: la primera la dispara
+  // el usuario al elegir el rango. Esperar no sale caro: mientras se escribe la
+  // contraseña, el login va precalentando el último mes en el servidor
+  // (services.precalentar_ultimo_mes) y las alertas quedan cacheadas día por
+  // día, así que cualquier rango reciente aprovecha parte de ese trabajo.
 
   const ddmmaaaa = (f) => f.split('-').reverse().join('/');  // 2026-07-15 -> 15/07/2026
+
+  const fechasListas = () => Boolean(inputDesde.value && inputHasta.value);
 
   /*
    * Dibuja una gráfica SVG dentro de "cont".
@@ -374,6 +398,67 @@ Cómo funciona:
       : `promedio de ${n} de ${total} vehículos`;
   }
 
+  // Calendario dibujado a mano (el proyecto no usa librerías de iconos):
+  // acompaña al texto "Selecciona las fechas" para que el hueco se lea como un
+  // paso pendiente y no como una gráfica que salió vacía.
+  const ICONO_FECHAS = `
+    <svg class="icono" width="34" height="34" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="16" rx="3"/>
+      <path d="M3 10h18M8 3v4M16 3v4"/>
+    </svg>`;
+
+  /*
+   * Pone el mismo estado en los cuatro huecos de gráfica, en la tabla de
+   * detalle y en el recuadro de la flota, para que la página nunca muestre una
+   * mezcla de "esperando fechas" con cifras de otra consulta.
+   */
+  function pintarEstado(html, textoTabla, subFlota) {
+    contenedoresViz.forEach(c => { c.innerHTML = html; });
+    document.querySelector('#tabla-detalle thead').innerHTML = '';
+    document.querySelector('#tabla-detalle tbody').innerHTML =
+      `<tr><td class="muted">${textoTabla}</td></tr>`;
+    document.getElementById('flota-valor').textContent = '—';
+    document.getElementById('flota-sub').textContent = subFlota;
+    notaVacia.classList.remove('visible');
+  }
+
+  // Estado de arranque: todavía no hay rango, así que no hay nada que pedirle
+  // al API. Es lo primero que ve quien entra al dashboard.
+  function estadoSinFechas() {
+    pintarEstado(
+      `<div class="estado-viz">${ICONO_FECHAS}
+         <div class="titulo">Selecciona las fechas</div>
+         <div class="sub">Elige el rango en «Desde» y «hasta»: la consulta arranca sola.</div>
+       </div>`,
+      'Selecciona las fechas para ver el detalle.', 'sin consultar');
+  }
+
+  // El mismo hueco, ya con las fechas puestas y la consulta en camino.
+  function estadoCargando() {
+    pintarEstado(
+      `<div class="estado-viz">
+         <div class="spinner"></div>
+         <div class="titulo">Consultando…</div>
+       </div>`,
+      'Consultando…', 'consultando…');
+  }
+
+  /*
+   * Estado tras un error. Si ya había una consulta buena, se vuelven a pintar
+   * esos datos: es más útil ver las cifras anteriores que cuatro huecos. El
+   * detalle del error siempre queda en el aviso rojo de arriba.
+   */
+  function estadoError() {
+    if (datos) { pintarTodo(); return; }
+    pintarEstado(
+      `<div class="estado-viz">
+         <div class="titulo">No se pudo consultar</div>
+         <div class="sub">Revisa el aviso de arriba y vuelve a presionar «Consultar».</div>
+       </div>`,
+      'No se pudo consultar.', 'sin datos');
+  }
+
   function pintarTodo() {
     if (!datos) return;
     revisarVacio();
@@ -412,13 +497,10 @@ Cómo funciona:
         </tr>`).join('');
   }
 
-  // A partir de un mes de rango el mensaje del spinner explica por qué la
-  // consulta puede tardar: son muchas peticiones al API (una getAlerts por
-  // día + eventos bus por bus) y el API exige 30 s entre peticiones.
+  // A partir de un mes de rango el aviso de espera explica por qué la consulta
+  // puede tardar: son muchas peticiones al API (una getAlerts por día +
+  // eventos bus por bus) y el API exige 30 s entre peticiones.
   const DIAS_AVISO = 31;
-  const overlay = document.getElementById('overlay-carga');
-  const overlayMsg = document.getElementById('overlay-msg');
-  const overlaySub = document.getElementById('overlay-sub');
 
   function diasDelRango() {
     const d1 = new Date(inputDesde.value), d2 = new Date(inputHasta.value);
@@ -455,20 +537,39 @@ Cómo funciona:
   const REINTENTOS = 3;
   const ESPERA_REINTENTO = 3000;
 
+  /*
+   * Mientras se consulta se bloquea todo lo que dispararía otra consulta: las
+   * dos fechas, las pestañas y los botones. "Consultar" además solo se habilita
+   * cuando el rango está completo; sin fechas no hay nada que pedir.
+   */
+  function bloquearControles(ocupado) {
+    inputDesde.disabled = ocupado;
+    inputHasta.disabled = ocupado;
+    btn.disabled = ocupado || !fechasListas();
+    tabs.querySelectorAll('button').forEach(b => { b.disabled = ocupado; });
+    botonesRango.forEach(b => { b.disabled = ocupado; });
+  }
+
   async function cargar() {
+    // Sin rango no se consulta nada, y con una consulta en curso tampoco: las
+    // fechas quedan bloqueadas mientras tanto, pero el guarda cubre también a
+    // quien llegue por otro camino (pestañas, atajos de rango).
+    if (cargando) return;
+    if (!fechasListas()) { estadoSinFechas(); return; }
+    cargando = true;
     const dias = diasDelRango();
-    btn.disabled = true;
-    tabs.querySelectorAll('button').forEach(b => { b.disabled = true; });
-    botonesRango.forEach(b => { b.disabled = true; });
-    overlayMsg.textContent = `Consultando ${dias} ${dias === 1 ? 'día' : 'días'} de información…`;
-    overlaySub.textContent = dias > DIAS_AVISO
-      ? 'Elegiste un rango de más de un mes: se consulta un día de alertas por ' +
-        'cada fecha, más las timbradas de cada bus, así que la primera vez ' +
-        'puede tardar. Las siguientes consultas del ' +
-        'mismo rango salen del cache y son casi instantáneas.'
-      : 'La primera consulta pregunta al API por cada día y por cada bus; ' +
-        'las siguientes salen del cache y son casi instantáneas.';
-    overlay.classList.add('visible');
+    bloquearControles(true);
+    estadoCargando();
+    notaCarga.innerHTML =
+      `<b>Consultando ${fmt(dias)} ${dias === 1 ? 'día' : 'días'} de información.</b> ` +
+      (dias > DIAS_AVISO
+        ? 'Elegiste un rango de más de un mes: se consulta un día de alertas por ' +
+          'cada fecha, más las timbradas de cada bus, así que la primera vez ' +
+          'puede tardar. Las siguientes consultas del ' +
+          'mismo rango salen del cache y son casi instantáneas.'
+        : 'La primera consulta pregunta al API por cada día y por cada bus; ' +
+          'las siguientes salen del cache y son casi instantáneas.');
+    notaCarga.classList.add('visible');
     try {
       const url = '{% url "tracking:api_dashboard" %}' +
         '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value +
@@ -484,8 +585,8 @@ Cómo funciona:
           break;
         } catch (e) {
           if (!e.reintentable || intento === REINTENTOS) throw e;
-          overlayMsg.textContent = `Reintentando… (${intento + 1} de ${REINTENTOS})`;
-          overlaySub.textContent =
+          notaCarga.innerHTML =
+            `<b>Reintentando… (${intento + 1} de ${REINTENTOS}).</b> ` +
             'La consulta anterior se pasó del tiempo límite, pero el servidor ' +
             'siguió trabajando y va dejando los datos en cache. El reintento ' +
             'suele responder mucho más rápido.';
@@ -493,7 +594,7 @@ Cómo funciona:
         }
       }
 
-      if (data.error) { mostrarAviso(data.error); return; }
+      if (data.error) { mostrarAviso(data.error); estadoError(); return; }
       // Si el API falló para algunas unidades, sus timbradas salen en 0 y eso
       // se lee igual que "no llevó pasajeros". Hay que decirlo.
       if (data.unidades_con_error) {
@@ -514,26 +615,45 @@ Cómo funciona:
     } catch (e) {
       mostrarAviso(e.message + ` Se intentó ${REINTENTOS} veces. Vuelve a ` +
                    `presionar Consultar: cada intento deja más datos en cache.`);
+      estadoError();
     } finally {
-      btn.disabled = false;
-      tabs.querySelectorAll('button').forEach(b => { b.disabled = false; });
-      botonesRango.forEach(b => { b.disabled = false; });
-      overlay.classList.remove('visible');
+      cargando = false;
+      bloquearControles(false);
+      notaCarga.classList.remove('visible');
     }
   }
 
   // Cambiar de pestaña vuelve a consultar con el mismo rango de fechas. Los
-  // servicios ya están en cache, así que el cambio es casi instantáneo.
+  // servicios ya están en cache, así que el cambio es casi instantáneo. Si
+  // todavía no hay fechas, la pestaña queda elegida y espera al rango.
   tabs.addEventListener('click', (ev) => {
     const b = ev.target.closest('button');
     if (!b || b.dataset.empresa === empresa) return;
     empresa = b.dataset.empresa;
     tabs.querySelectorAll('button').forEach(x => x.classList.toggle('activa', x === b));
-    cargar();
+    if (fechasListas()) cargar();
   });
 
-  // Atajos de rango: cuentan hacia atrás desde hoy (7 y 30 días, hoy incluido),
-  // igual que el rango por defecto al abrir la página.
+  /*
+   * Elegir las fechas es lo que dispara la consulta: apenas están las dos
+   * puestas se pide al API, sin tener que presionar nada más. 'change' salta
+   * cuando la fecha queda completa (no mientras se teclea), así que no se
+   * dispara a medio escribir.
+   *
+   * Si en cambio se BORRA una fecha, las gráficas que ya estaban se dejan
+   * quietas: quien está corrigiendo el rango no debería perder de vista lo que
+   * venía mirando. Solo se vuelve al "Selecciona las fechas" cuando nunca hubo
+   * una consulta.
+   */
+  [inputDesde, inputHasta].forEach(input => input.addEventListener('change', () => {
+    btn.disabled = !fechasListas();
+    if (fechasListas()) cargar();
+    else if (!datos) estadoSinFechas();
+  }));
+
+  // Atajos de rango: cuentan hacia atrás desde hoy (7 y 30 días, hoy incluido)
+  // y consultan de una vez. Poner el valor por código no dispara 'change', así
+  // que la consulta no sale dos veces.
   botonesRango.forEach(b => b.addEventListener('click', () => {
     const dias = +b.dataset.dias;
     const fin = new Date();
@@ -544,7 +664,14 @@ Cómo funciona:
   }));
 
   btn.addEventListener('click', cargar);
-  window.addEventListener('resize', pintarTodo);   // repintar al cambiar tamaño
-  cargar();
+  // Repintar al cambiar tamaño, pero nunca encima de una consulta en curso:
+  // ahí el hueco lo ocupa el spinner y repintar taparía la señal de que se
+  // está trabajando con las cifras de la consulta anterior.
+  window.addEventListener('resize', () => { if (!cargando) pintarTodo(); });
+
+  // Arranque: ni una consulta automática. La página abre con los huecos
+  // pidiendo el rango, y es el usuario quien decide qué se le pregunta al API.
+  estadoSinFechas();
+  document.getElementById('estado').textContent = 'Selecciona un rango de fechas';
 </script>
 {% endblock %}

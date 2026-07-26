@@ -103,8 +103,8 @@ variables de arriba. Tras 5 intentos fallidos desde la misma IP el login se
 bloquea 60 segundos. `/admin/` conserva su propio login de Django.
 
 Mientras el usuario escribe su contraseña, el servidor **precalienta en
-segundo plano** la consulta con la que abre el dashboard (el último mes), de
-modo que al entrar ya esté en cache.
+segundo plano** las consultas al API del último mes, para adelantar trabajo
+antes de que la persona elija un rango.
 
 ## Pruebas
 
@@ -122,18 +122,22 @@ sin credenciales y en un par de segundos.
 Una consulta hace una petición por cada día del rango (alertas) más una por cada
 bus (timbradas). Se lanzan **en paralelo** (8 a la vez), y todo se cachea.
 
-El dashboard abre con el rango del **último mes** (de hace 30 días a hoy, por
-ejemplo 25/06 → 25/07), y ese mismo rango es el que el login precalienta
-mientras se escribe la contraseña — medido contra el API real:
+El dashboard **abre sin fechas y no consulta nada solo**: las gráficas dicen
+«Selecciona las fechas» y la consulta arranca cuando el usuario pone el rango
+(o usa un atajo). Así no se gasta una consulta pesada en un rango que nadie
+pidió.
+
+El login precalienta el **último mes** (de hace 30 días a hoy, por ejemplo
+25/06 → 25/07, ver `DIAS_ULTIMO_MES` en `services.py`) — medido contra el API
+real:
 
 | | Tiempo |
 |---|---|
 | Último mes en frío (lo que tarda el precalentamiento) | ~21 s |
-| La misma consulta al entrar, ya precalentada | ~0,4 s |
+| La misma consulta ya precalentada | ~0,4 s |
 
-Si se cambia el rango inicial en `dashboard.html`, hay que cambiar también
-`DIAS_ULTIMO_MES` en `services.py`: si no coinciden exactamente, el
-precalentamiento deja de servir.
+Como las alertas se cachean **día por día**, ese precalentamiento le sirve a
+cualquier rango que caiga dentro del último mes, no solo al rango exacto.
 
 Si el rango cabe en el mes en curso se pide el mes completo de una vez y se
 recorta en memoria, en vez de una consulta distinta por cada rango.
