@@ -15,11 +15,15 @@ ALL the vehicles fit on the X axis):
    ├─────────────────────────┼─────────────────────────┤
    │ Ocupación real (barras) │ Capacidad total (barras)│
    ├─────────────────────────┴─────────────────────────┤
-   │ Detalle por día de las timbradas (tabla)          │
+   │ Capacidad vs Timbradas (dos barras por interno)   │
+   ├───────────────────────────────────────────────────┤
+   │ Detalle timbradas por día (tabla)                 │
    └───────────────────────────────────────────────────┘
 
-Las 4 gráficas van en rejilla 2x2, todas del mismo tamaño y con el número
-interno del vehículo en el eje X. El detalle por día queda solo, a lo ancho.
+Las 4 primeras gráficas van en rejilla 2x2, todas del mismo tamaño y con el
+número interno del vehículo en el eje X. La comparación y el detalle por día
+quedan solos, a lo ancho: la primera porque lleva dos barras por interno y la
+segunda porque es una tabla con una columna por bus.
 
 Cada servicio pertenece a una empresa distinta y se reconoce por el nombre de
 la geocerca en la que entra el bus. Las pestañas de arriba recalculan TODO el
@@ -172,6 +176,24 @@ Cómo funciona:
   .viz .pt    { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 1.5; }
   .viz .bar   { fill: var(--series-1); }
 
+  /* Las dos series de «Capacidad vs Timbradas». El orden de los colores es
+     fijo: la capacidad siempre es la azul y las timbradas siempre la verde,
+     pase lo que pase con el filtro de empresa. */
+  .viz .serie-a { fill: var(--series-1); }
+  .viz .serie-b { fill: var(--series-2); }
+
+  /* Leyenda: con dos series el color solo no puede ser la única pista de qué
+     es cada barra. El texto va en tinta normal y el color lo lleva la muestra
+     de al lado, no la letra. */
+  .leyenda {
+    display: flex; flex-wrap: wrap; gap: 16px;
+    margin: -4px 0 12px; font-size: 12px; color: var(--text-secondary);
+  }
+  .leyenda .clave { display: inline-flex; align-items: center; gap: 6px; }
+  .leyenda .muestra { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .leyenda .serie-a { background: var(--series-1); }
+  .leyenda .serie-b { background: var(--series-2); }
+
   /* la tabla del detalle puede ser muy ancha: números compactos */
   #tabla-detalle td, #tabla-detalle th { padding: 6px 8px; font-size: 12px; white-space: nowrap; }
 </style>
@@ -244,8 +266,16 @@ Cómo funciona:
 </div>
 </div><!-- /grid-2 -->
 
+<!-- Va a lo ancho y no dentro de la rejilla 2x2: son DOS barras por interno, y
+     con 35 buses en media pantalla no se distinguiría una de otra. -->
 <div class="card">
-  <h2>Detalle por día de las timbradas</h2>
+  <h2>Capacidad vs Timbradas</h2>
+  <p class="desc">Puestos que ofreció cada vehículo en el rango (capacidad × servicios) frente a los pasajeros que de verdad subieron. La diferencia entre las dos barras es el cupo que viajó vacío. Solo se muestran los vehículos con capacidad y servicios registrados.</p>
+  <div class="viz" id="chart-comparativa"></div>
+</div>
+
+<div class="card">
+  <h2>Detalle timbradas por día</h2>
   <p class="desc">Timbradas de cada vehículo, día por día del rango consultado.</p>
   <div class="scroll-x">
     <table id="tabla-detalle">
@@ -280,6 +310,18 @@ Cómo funciona:
 
   const ddmmaaaa = (f) => f.split('-').reverse().join('/');  // 2026-07-15 -> 15/07/2026
 
+  // Número con una cantidad FIJA de decimales (es-CO: coma decimal, punto de
+  // miles). fmt() a secas se los come cuando el valor es redondo, y entonces
+  // una columna de porcentajes queda desalineada: 94 junto a 93,75. Se usa en
+  // la ocupación, que es la única cifra con decimales; servicios, timbradas y
+  // capacidad son conteos y siguen en entero.
+  const fmtDec = (n, decimales) => Number(n).toLocaleString('es-CO', {
+    minimumFractionDigits: decimales, maximumFractionDigits: decimales });
+
+  // Decimales del porcentaje de ocupación. El servidor ya lo manda redondeado
+  // a dos (services.range_summary), así que este número y aquel van juntos.
+  const DECIMALES_OCUPACION = 2;
+
   // Hoy, en la zona horaria del navegador y en el formato que usan los inputs
   // (YYYY-MM-DD). 'sv-SE' da justo ese formato; toISOString() no serviría
   // porque pasa a UTC y en Colombia adelantaría el día desde las 7 p.m.
@@ -308,10 +350,12 @@ Cómo funciona:
    *  - labels: textos del eje X (los internos)
    *  - values: un número por etiqueta
    *  - tipo:   'linea' (Servicios y Timbradas, como el boceto) o 'barras'.
+   *  - decimales: cuántos mostrar en el eje Y y en el tooltip (0 = entero).
    * Sin librerías: se arma el SVG como texto y se le agregan zonas
    * invisibles de hover para el tooltip.
    */
-  function pintarGrafica(cont, labels, values, tipo, nombreSerie, unidad = '') {
+  function pintarGrafica(cont, labels, values, tipo, nombreSerie, unidad = '',
+                         decimales = 0) {
     const n = labels.length;
     if (!n) { cont.innerHTML = '<p class="muted">Sin vehículos.</p>'; return; }
     // Cada vehículo tiene garantizado un ancho mínimo para que SU interno
@@ -328,10 +372,13 @@ Cómo funciona:
     const y = v => pt + ih * (1 - v / max);
 
     let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${nombreSerie} por interno">`;
-    // rejilla horizontal: 0, mitad y máximo
-    for (const t of [0, Math.round(max / 2), max]) {
+    // rejilla horizontal: 0, mitad y máximo. La marca de la mitad se redondea
+    // solo en las gráficas de conteo (media timbrada no existe); donde hay
+    // decimales se deja el valor exacto para que la etiqueta no mienta.
+    const medio = decimales ? max / 2 : Math.round(max / 2);
+    for (const t of [0, medio, max]) {
       s += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${y(t)}" y2="${y(t)}"/>`;
-      s += `<text class="lbl" x="${pl - 6}" y="${y(t) + 3}" text-anchor="end">${fmt(t)}${unidad}</text>`;
+      s += `<text class="lbl" x="${pl - 6}" y="${y(t) + 3}" text-anchor="end">${fmtDec(t, decimales)}${unidad}</text>`;
     }
     s += `<line class="base" x1="${pl}" x2="${W - pr}" y1="${y(0)}" y2="${y(0)}"/>`;
     // etiquetas del eje X: TODOS los internos (rotados para que no se encimen)
@@ -360,7 +407,106 @@ Cómo funciona:
       const i = +r.dataset.i;
       r.addEventListener('mouseenter', ev => tooltipShow(
         `<div class="t-title">${labels[i]}</div>
-         <div class="t-row">${nombreSerie}: <b>${fmt(values[i])}${unidad}</b></div>`, ev));
+         <div class="t-row">${nombreSerie}: <b>${fmtDec(values[i], decimales)}${unidad}</b></div>`, ev));
+      r.addEventListener('mousemove', tooltipMove);
+      r.addEventListener('mouseleave', tooltipHide);
+    });
+  }
+
+  /*
+   * Barra con las puntas de arriba redondeadas y el pie cuadrado sobre la
+   * línea de base. Un <rect rx> redondearía también las esquinas de abajo y
+   * despegaría la barra del cero.
+   */
+  function barra(x, arriba, ancho, alto, radio = 4) {
+    const r = Math.max(Math.min(radio, ancho / 2, alto), 0);
+    const base = arriba + alto;
+    return `M${x},${base} L${x},${arriba + r} Q${x},${arriba} ${x + r},${arriba} ` +
+           `L${x + ancho - r},${arriba} Q${x + ancho},${arriba} ${x + ancho},${arriba + r} ` +
+           `L${x + ancho},${base} Z`;
+  }
+
+  /*
+   * Gráfica de dos series enfrentadas: por cada interno, dos barras lado a lado.
+   *
+   * Las dos series comparten UN SOLO eje a propósito. Puestos ofrecidos y
+   * pasajeros que subieron se miden en lo mismo (personas), así que la
+   * comparación solo significa algo en una escala común: con un eje para cada
+   * una, cualquier par de barras se vería parejo y la gráfica diría que todos
+   * los buses van llenos.
+   *
+   *  - series: [{nombre, valores, clase}, ...]. El orden fija el color.
+   */
+  function pintarComparativa(cont, labels, series) {
+    const n = labels.length;
+    if (!n) {
+      cont.innerHTML = '<p class="muted">Sin vehículos con capacidad y servicios registrados.</p>';
+      return;
+    }
+    // Dos barras por interno piden más aire que una sola.
+    const ANCHO_MIN_POR_BUS = 46;
+    const SEPARACION = 2;      // aire entre las dos barras del mismo interno
+    const GROSOR_MAX = 24;     // una barra nunca llena su ranura
+    const pl = 44, pr = 12, pt = 10, pb = 74;
+    const H = 320;
+    const W = Math.max(cont.clientWidth, 320, n * ANCHO_MIN_POR_BUS + pl + pr);
+    const iw = W - pl - pr, ih = H - pt - pb;
+    const max = Math.max(1, ...series.flatMap(s => s.valores));
+    const slot = iw / n;
+    const y = v => pt + ih * (1 - v / max);
+    const ancho = Math.min(GROSOR_MAX, Math.max((slot - SEPARACION) / 2 - 3, 1.5));
+    // Las dos barras, centradas dentro de la ranura del interno.
+    const x0 = i => pl + i * slot + (slot - (ancho * 2 + SEPARACION)) / 2;
+
+    const titulo = series.map(s => s.nombre).join(' y ');
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" ` +
+            `aria-label="${titulo} por interno">`;
+    for (const t of [0, Math.round(max / 2), max]) {
+      s += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${y(t)}" y2="${y(t)}"/>`;
+      s += `<text class="lbl" x="${pl - 6}" y="${y(t) + 3}" text-anchor="end">${fmt(t)}</text>`;
+    }
+    s += `<line class="base" x1="${pl}" x2="${W - pr}" y1="${y(0)}" y2="${y(0)}"/>`;
+    labels.forEach((lb, i) => {
+      const cx = pl + i * slot + slot / 2;
+      s += `<text class="lbl" transform="rotate(-45 ${cx} ${H - pb + 16})" x="${cx}" ` +
+           `y="${H - pb + 16}" text-anchor="end">${lb}</text>`;
+    });
+
+    series.forEach((serie, j) => {
+      serie.valores.forEach((v, i) => {
+        const alto = v > 0 ? Math.max(ih * v / max, 2) : 0;
+        if (!alto) return;
+        s += `<path class="${serie.clase}" d="${barra(x0(i) + j * (ancho + SEPARACION), y(0) - alto, ancho, alto)}"/>`;
+      });
+    });
+    // Una zona de hover por interno (no por barra): el tooltip compara las dos
+    // cifras, así que apuntar a cualquiera de las dos debe mostrar lo mismo.
+    labels.forEach((lb, i) => {
+      s += `<rect class="hover" data-i="${i}" x="${pl + i * slot}" y="${pt}" ` +
+           `width="${slot}" height="${ih}" fill="transparent"/>`;
+    });
+    s += '</svg>';
+
+    cont.innerHTML =
+      '<div class="leyenda">' +
+      series.map(se => `<span class="clave"><span class="muestra ${se.clase}"></span>${se.nombre}</span>`).join('') +
+      '</div>' + s;
+
+    cont.querySelectorAll('.hover').forEach(r => {
+      const i = +r.dataset.i;
+      const [ofrecidos, subieron] = series.map(se => se.valores[i]);
+      const libres = ofrecidos - subieron;
+      // Más timbradas que puestos es posible (un viaje cuya entrada a la
+      // geocerca no quedó registrada no suma servicios pero sí pasajeros),
+      // y decir "-4 puestos vacíos" sería peor que nombrarlo.
+      const resto = libres >= 0
+        ? `Puestos vacíos: <b>${fmt(libres)}</b>`
+        : `Sobrecupo: <b>${fmt(-libres)}</b>`;
+      r.addEventListener('mouseenter', ev => tooltipShow(
+        `<div class="t-title">${labels[i]}</div>
+         <div class="t-row">${series[0].nombre}: <b>${fmt(ofrecidos)}</b></div>
+         <div class="t-row">${series[1].nombre}: <b>${fmt(subieron)}</b></div>
+         <div class="t-row">${resto}</div>`, ev));
       r.addEventListener('mousemove', tooltipMove);
       r.addEventListener('mouseleave', tooltipHide);
     });
@@ -415,7 +561,8 @@ Cómo funciona:
     const valor = datos.ocupacion_flota;
     const n = datos.vehiculos_en_promedio || 0;
     const total = datos.vehiculos.length;
-    document.getElementById('flota-valor').textContent = valor == null ? '—' : valor + '%';
+    document.getElementById('flota-valor').textContent =
+      valor == null ? '—' : fmtDec(valor, DECIMALES_OCUPACION) + '%';
     document.getElementById('flota-sub').textContent = valor == null
       ? 'ningún vehículo con datos'
       : `promedio de ${n} de ${total} vehículos`;
@@ -499,7 +646,8 @@ Cómo funciona:
     const conCap = datos.vehiculos.filter(v => v.ocupacion != null);
     pintarGrafica(document.getElementById('chart-ocupacion'),
                   conCap.map(v => v.interno),
-                  conCap.map(v => v.ocupacion), 'barras', 'Ocupación real', '%');
+                  conCap.map(v => v.ocupacion), 'barras', 'Ocupación real', '%',
+                  DECIMALES_OCUPACION);
 
     // Capacidad total = capacidad × servicios: los puestos que ofreció el bus
     // en todo el rango (31 asientos × 5 servicios = 155 puestos). Solo los
@@ -509,7 +657,15 @@ Cómo funciona:
                   conServ.map(v => v.interno),
                   conServ.map(v => v.capacidad_total), 'barras', 'Capacidad total');
 
-    // Tabla Detalle por día: filas = fechas, columnas = internos
+    // Capacidad vs Timbradas: los puestos que se ofrecieron contra los que se
+    // usaron, sobre los mismos buses que la gráfica de capacidad.
+    pintarComparativa(document.getElementById('chart-comparativa'),
+                      conServ.map(v => v.interno), [
+      {nombre: 'Capacidad total', valores: conServ.map(v => v.capacidad_total), clase: 'serie-a'},
+      {nombre: 'Timbradas', valores: conServ.map(v => v.timbradas), clase: 'serie-b'},
+    ]);
+
+    // Tabla Detalle timbradas por día: filas = fechas, columnas = internos
     document.querySelector('#tabla-detalle thead').innerHTML =
       '<tr><th>Fecha</th>' + datos.detalle.internos.map(p => `<th class="num">${p}</th>`).join('') + '</tr>';
     document.querySelector('#tabla-detalle tbody').innerHTML =

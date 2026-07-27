@@ -237,6 +237,20 @@ class RangeSummaryTests(TestCase):
         self.assertEqual(ditar['vehiculos'][0]['servicios'], 1)
         self.assertEqual(ditar['vehiculos'][0]['timbradas'], 1)
 
+    def test_la_ocupacion_lleva_dos_decimales(self, eventos, vehiculos, alertas):
+        """Redondear a entero juntaba buses que no van igual de llenos."""
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
+                                _alerta('100', '14:00:00', 'PROCAPS')]
+        # 58 timbradas / (2 servicios x 31 asientos) = 93,548... -> 93,55 %
+        eventos.side_effect = lambda equipo, *a, **k: (
+            [{'fecha': '2026-07-20', 'hora': '08:30:00', 'pasajero': 'a'}] * 58)
+
+        r = services.range_summary('2026-07-20', '2026-07-20')
+
+        self.assertEqual(r['vehiculos'][0]['ocupacion'], 93.55)
+        self.assertEqual(r['ocupacion_flota'], 93.55)
+
     def test_todas_respeta_el_techo_del_usuario(self, eventos, vehiculos, alertas):
         """Sin empresa elegida, un usuario de PROCAPS no suma viajes de DITAR."""
         vehiculos.return_value = self.VEHICULOS[:1]

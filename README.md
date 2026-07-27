@@ -164,7 +164,7 @@ antes de que la persona elija un rango.
 python manage.py test
 ```
 
-70 pruebas que **no tocan la red**: el API se simula con `mock`, así que corren
+71 pruebas que **no tocan la red**: el API se simula con `mock`, así que corren
 sin credenciales y en un par de segundos.
 
 ---

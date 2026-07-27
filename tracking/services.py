@@ -528,7 +528,10 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
         capacidad = CAPACIDAD_POR_INTERNO.get(_norm_interno(interno))
         if capacidad and n_servicios:
             # Ocupación = timbradas reales / cupo total (capacidad * viajes).
-            ocupacion = round(timbradas / (n_servicios * capacidad) * 100)
+            # Con dos decimales: redondear a entero borra diferencias que sí
+            # importan cuando se comparan buses parecidos (93,75 % y 94,20 %
+            # salían los dos como 94 %).
+            ocupacion = round(timbradas / (n_servicios * capacidad) * 100, 2)
         else:
             ocupacion = None
         capacidad_total = capacidad * n_servicios if capacidad and n_servicios else None
@@ -548,7 +551,8 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
     vehiculos.sort(key=lambda v: v['interno'] or '')
     internos = [v['interno'] for v in vehiculos]
     porcentajes = [v['ocupacion'] for v in vehiculos if v['ocupacion'] is not None]
-    ocupacion_flota = round(sum(porcentajes) / len(porcentajes)) if porcentajes else None
+    ocupacion_flota = (round(sum(porcentajes) / len(porcentajes), 2)
+                       if porcentajes else None)
     # Los catálogos que vuelven al navegador son los del usuario, no los de la
     # flota entera: así el JSON no nombra siquiera las empresas que no puede ver.
     tabs = list(EMPRESAS) if permitidas is None else list(permitidas)
