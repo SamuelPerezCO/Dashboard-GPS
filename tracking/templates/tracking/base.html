@@ -104,6 +104,15 @@ Contiene:
   }
   .marca-cliente .nombre { font-size: 15px; font-weight: 650; }
   #estado { color: var(--text-muted); font-size: 12px; }
+  /* Usuario dentro de la sesión. Importa verlo: cada usuario ve un dashboard
+     distinto (solo los viajes de su empresa), así que un cero puede ser "no
+     hubo viajes" o "entraste con la cuenta equivocada". */
+  header .usuario {
+    display: flex; align-items: center; gap: 6px; flex: none;
+    color: var(--text-secondary); font-size: 13px; font-weight: 550;
+    border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px;
+  }
+  header .usuario .punto { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
   /* Botón de cerrar sesión: discreto, para no competir con el menú. */
   header .salir { display: flex; }
   header .salir button {
@@ -252,6 +261,12 @@ hay sesión que vigilar y cerrarla otra vez sería un ciclo infinito.
     <span class="nombre">Expreso Brasilia</span>
     <span id="estado"></span>
   </div>
+  {# Con qué cuenta se entró: define qué viajes se están viendo. #}
+  {% if usuario %}
+  <span class="usuario" title="Sesión iniciada como {{ usuario }}">
+    <span class="punto" aria-hidden="true"></span>{{ usuario }}
+  </span>
+  {% endif %}
   {# Por POST y con token CSRF: así nadie puede cerrarte la sesión desde fuera. #}
   <form class="salir" method="post" action="{% url 'tracking:logout' %}">
     {% csrf_token %}

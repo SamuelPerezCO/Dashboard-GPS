@@ -3,8 +3,9 @@
 =============================================================================
  ACCESO — formulario de entrada al dashboard
 =============================================================================
-No hay usuarios en base de datos: se compara contra DASHBOARD_USER y
-DASHBOARD_PASSWORD de config/settings.py (ver tracking/views.py:login_view).
+No hay usuarios en base de datos: se compara contra el catálogo
+DASHBOARD_USUARIOS de config/settings.py (ver tracking/views.py:login_view).
+Cada usuario ve solo los viajes de su empresa; el de acceso total los ve todos.
 
 Esta página es la única que se puede ver sin sesión iniciada; de eso se
 encarga tracking/middleware.py. Por eso oculta el menú y el nombre del

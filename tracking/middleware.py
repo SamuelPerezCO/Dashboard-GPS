@@ -1,10 +1,17 @@
 """Middleware que exige iniciar sesión para ver el dashboard.
 
-El dashboard no tiene usuarios en base de datos: se protege con un único
-usuario/contraseña definido en settings (``DASHBOARD_USER`` /
-``DASHBOARD_PASSWORD``). Cuando alguien entra bien, :mod:`tracking.views`
-marca la sesión con :data:`CLAVE_SESION` y este middleware es el que
-comprueba esa marca en todas las peticiones.
+El dashboard no tiene usuarios en base de datos: se protege con el
+catálogo ``DASHBOARD_USUARIOS`` de settings (ahí se agregan y se quitan
+usuarios). Cuando alguien entra bien, :mod:`tracking.views` marca la
+sesión con :data:`CLAVE_SESION` y guarda su nombre en
+:data:`CLAVE_USUARIO`; este middleware es el que comprueba esa marca en
+todas las peticiones.
+
+En la sesión solo va el NOMBRE del usuario, nunca sus permisos: los
+permisos se releen del catálogo en cada petición
+(:func:`cuenta_actual`). Así, cambiar quién ve qué en settings surte
+efecto de inmediato, y no queda gente paseándose con permisos viejos
+guardados en su cookie.
 """
 
 from django.conf import settings
@@ -13,6 +20,10 @@ from django.urls import reverse
 
 # Marca que se guarda en la sesión cuando el login fue correcto.
 CLAVE_SESION = 'dashboard_autenticado'
+
+# Nombre (en minúsculas) del usuario que inició sesión: la llave con la que se
+# busca su ficha en settings.DASHBOARD_USUARIOS.
+CLAVE_USUARIO = 'dashboard_usuario'
 
 # Marca de un solo uso que el login deja puesta para la PRIMERA página que se
 # pinte después de entrar. La cookie de sesión la comparten todas las pestañas
@@ -24,6 +35,33 @@ CLAVE_SESION = 'dashboard_autenticado'
 CLAVE_LOGIN_NUEVO = 'login_recien_hecho'
 
 
+def nombre_usuario(request):
+    """Devuelve el nombre del usuario de la sesión, o cadena vacía.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        El nombre en minúsculas tal como está en el catálogo.
+    """
+    return request.session.get(CLAVE_USUARIO) or ''
+
+
+def cuenta_actual(request):
+    """Busca en el catálogo la ficha del usuario que inició sesión.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        El diccionario del usuario en ``settings.DASHBOARD_USUARIOS``
+        (con ``clave`` y ``empresas``), o None si la sesión no tiene
+        usuario o si ese usuario ya no existe en el catálogo (por
+        ejemplo, porque se le quitó el acceso).
+    """
+    return settings.DASHBOARD_USUARIOS.get(nombre_usuario(request))
+
+
 def esta_autenticado(request):
     """Indica si la petición viene de una sesión que ya inició sesión.
 
@@ -31,9 +69,27 @@ def esta_autenticado(request):
         request: El HttpRequest entrante.
 
     Returns:
-        True si la sesión tiene la marca de autenticación.
+        True si la sesión tiene la marca de autenticación y su usuario
+        sigue existiendo en el catálogo.
     """
-    return bool(request.session.get(CLAVE_SESION))
+    return bool(request.session.get(CLAVE_SESION)) and cuenta_actual(request) is not None
+
+
+def tiene_acceso_total(request):
+    """Dice si el usuario de la sesión puede verlo todo.
+
+    Es el permiso del usuario ``admin``: todas las empresas y las
+    páginas que no están repartidas por empresa, como el mapa de flota
+    en vivo (que muestra la flota completa, no los viajes de un cliente).
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        True si su entrada del catálogo tiene ``empresas`` en None.
+    """
+    cuenta = cuenta_actual(request)
+    return cuenta is not None and cuenta.get('empresas') is None
 
 
 class LoginRequeridoMiddleware:

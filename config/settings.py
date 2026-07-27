@@ -60,17 +60,44 @@ GPS_USERNAME = os.getenv('GPS_USERNAME', '')
 GPS_PASSWORD = os.getenv('GPS_PASSWORD', '')
 
 
-# --- Acceso al dashboard (login simple, un solo usuario) ---
-# No hay usuarios en base de datos: el dashboard se protege con estas dos
-# credenciales, que compara tracking/views.py y exige
-# tracking.middleware.LoginRequeridoMiddleware en todas las páginas.
+# --- Acceso al dashboard: catálogo de usuarios -----------------------------
 #
-# El valor por defecto es 1234/1234 para poder entrar de una vez. Es una
-# credencial débil y el sitio es público (dashboardgps.qd.je): para producción
-# escribe DASHBOARD_USER y DASHBOARD_PASSWORD en el .env (que no se sube a git)
-# y no hace falta tocar el código.
-DASHBOARD_USER = os.getenv('DASHBOARD_USER', '1234')
-DASHBOARD_PASSWORD = os.getenv('DASHBOARD_PASSWORD', '1234')
+# ===== AQUÍ SE AGREGAN O SE QUITAN USUARIOS. No hay usuarios en base de =====
+# ===== datos: esta tabla es la única fuente de verdad.                 =====
+#
+# Cada entrada tiene dos cosas:
+#
+#   'clave'    la contraseña. Distingue mayúsculas de minúsculas.
+#              El usuario NO: se busca en minúsculas, así que "Procaps",
+#              "procaps" y "PROCAPS" entran a la misma cuenta.
+#
+#   'empresas' de qué empresas puede ver los viajes; son los valores de
+#              tracking.services.EMPRESAS. None = acceso total (todas las
+#              pestañas y también el mapa de flota en vivo, /mapa/).
+#
+# Lo que NO se pudo atribuir a ninguna empresa (la pestaña «Sin identificar»)
+# se le agrega a todos los usuarios, aquí no hay que ponerlo: lo hace
+# tracking.services.tabs_permitidas. Como la única geocerca creada hoy es la
+# de PROCAPS, casi toda la actividad de DITAR y RELIANZ cae ahí, y sin eso sus
+# usuarios verían el dashboard vacío.
+#
+# Quién ve qué lo aplican tracking/views.py (las pestañas que se dibujan y el
+# filtro del endpoint JSON) y tracking/middleware.py (exige sesión iniciada).
+#
+# Las contraseñas están en el código porque el sitio se despliega desde el
+# repo, pero cada una se puede sobrescribir por variable de entorno en el .env
+# (que no se sube a git) sin tocar este archivo.
+DASHBOARD_USUARIOS = {
+    #  usuario        contraseña                                  empresas que ve
+    'admin':   {'clave': os.getenv('DASHBOARD_CLAVE_ADMIN', 'Admin'),
+                'empresas': None},                                # todas
+    'procaps': {'clave': os.getenv('DASHBOARD_CLAVE_PROCAPS', 'Procaps'),
+                'empresas': ('PROCAPS',)},
+    'ditar':   {'clave': os.getenv('DASHBOARD_CLAVE_DITAR', 'Ditar'),
+                'empresas': ('DITAR',)},
+    'relianz': {'clave': os.getenv('DASHBOARD_CLAVE_RELIANZ', 'relianz'),
+                'empresas': ('RELIANZ',)},
+}
 
 # La sesión viaja dentro de una cookie firmada, NO en la base de datos.
 #

@@ -18,7 +18,9 @@ from django.utils.crypto import constant_time_compare
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from . import api_client, services
-from .middleware import CLAVE_LOGIN_NUEVO, CLAVE_SESION, esta_autenticado
+from .middleware import (CLAVE_LOGIN_NUEVO, CLAVE_SESION, CLAVE_USUARIO,
+                         cuenta_actual, esta_autenticado, nombre_usuario,
+                         tiene_acceso_total)
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +94,27 @@ def _clave_intentos(request):
     return f"login_intentos::{request.META.get('REMOTE_ADDR') or 'desconocida'}"
 
 
+def _empresas_permitidas(request):
+    """Pestañas que puede ver el usuario de la sesión.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        Lista de valores de :data:`tracking.services.EMPRESAS`. Siempre
+        incluye «Sin identificar» (ver
+        :func:`tracking.services.tabs_permitidas`).
+    """
+    cuenta = cuenta_actual(request) or {}
+    return services.tabs_permitidas(cuenta.get('empresas'))
+
+
 def login_view(request):
     """Muestra y procesa el formulario de acceso al dashboard.
 
-    Compara contra el usuario y la contraseña de settings
-    (``DASHBOARD_USER`` / ``DASHBOARD_PASSWORD``); no hay usuarios en
-    base de datos.
+    Compara contra el catálogo ``DASHBOARD_USUARIOS`` de settings (ahí
+    se agregan y se quitan usuarios); no hay usuarios en base de datos.
+    El nombre de usuario no distingue mayúsculas, la contraseña sí.
 
     Al mostrar el formulario (GET) lanza además el precalentamiento del
     dashboard en segundo plano: mientras la persona escribe su
@@ -134,18 +151,25 @@ def login_view(request):
             error = (f'Demasiados intentos fallidos. Espera {BLOQUEO_SEGUNDOS} '
                      f'segundos y vuelve a intentarlo.')
         else:
-            usuario = (request.POST.get('usuario') or '').strip()
+            # El usuario se busca en minúsculas ("Procaps" y "procaps" son la
+            # misma cuenta); la contraseña sí distingue mayúsculas.
+            usuario = (request.POST.get('usuario') or '').strip().lower()
             clave = request.POST.get('clave') or ''
-            # constant_time_compare no delata la contraseña por el tiempo que
-            # tarda en responder. Se evalúan las dos para no cortar antes.
-            ok_usuario = constant_time_compare(usuario, settings.DASHBOARD_USER)
-            ok_clave = constant_time_compare(clave, settings.DASHBOARD_PASSWORD)
-            if ok_usuario and ok_clave:
+            cuenta = settings.DASHBOARD_USUARIOS.get(usuario)
+            # Se compara siempre, exista o no la cuenta: constant_time_compare
+            # no delata la contraseña por el tiempo que tarda en responder, y
+            # comparar contra '' cuando el usuario no existe evita que el
+            # atajo delate cuáles nombres de usuario son reales.
+            ok_clave = constant_time_compare(clave, cuenta['clave'] if cuenta else '')
+            if cuenta and ok_clave:
                 cache.delete(clave_intentos)
                 # Renueva el identificador de sesión al entrar, para que una
                 # sesión creada antes del login no quede válida después.
                 request.session.cycle_key()
                 request.session[CLAVE_SESION] = True
+                # Quién entró. Los permisos NO se guardan aquí: se releen del
+                # catálogo en cada petición (ver middleware.cuenta_actual).
+                request.session[CLAVE_USUARIO] = usuario
                 # La página a la que se llega ahora es la que sella la pestaña.
                 request.session[CLAVE_LOGIN_NUEVO] = True
                 return redirect(destino)
@@ -193,9 +217,9 @@ def _sesion_nueva(request):
 def dashboard(request):
     """Renderiza la página principal del dashboard de ocupación.
 
-    Pasa el catálogo de empresas para que las pestañas se dibujen a
-    partir de :data:`tracking.services.EMPRESAS` y no haya que
-    mantener la misma lista duplicada en la plantilla.
+    Pasa solo las pestañas que el usuario tiene permitidas, para que no
+    se dibuje siquiera la de una empresa que no puede consultar (el
+    endpoint JSON la rechaza igual, ver :func:`api_dashboard`).
 
     Args:
         request: El HttpRequest entrante.
@@ -205,7 +229,8 @@ def dashboard(request):
     """
     return render(request, 'tracking/dashboard.html', {
         'empresas': [{'valor': e, 'etiqueta': services.ETIQUETA_EMPRESA[e]}
-                     for e in services.EMPRESAS],
+                     for e in _empresas_permitidas(request)],
+        'usuario': nombre_usuario(request),
         'sesion_nueva': _sesion_nueva(request),
     })
 
@@ -213,13 +238,22 @@ def dashboard(request):
 def fleet_dashboard(request):
     """Renderiza la página del mapa de flota en vivo.
 
+    Solo para usuarios con acceso total: el mapa muestra la flota
+    completa en vivo, que no está repartida por empresa (un mismo bus
+    hace viajes de varios clientes). Quien no lo tenga vuelve a su
+    dashboard.
+
     Args:
         request: El HttpRequest entrante.
 
     Returns:
-        HttpResponse con la plantilla ``tracking/fleet.html``.
+        HttpResponse con la plantilla ``tracking/fleet.html``, o una
+        redirección al dashboard si el usuario no tiene acceso total.
     """
+    if not tiene_acceso_total(request):
+        return redirect('tracking:dashboard')
     return render(request, 'tracking/fleet.html', {
+        'usuario': nombre_usuario(request),
         'sesion_nueva': _sesion_nueva(request),
     })
 
@@ -273,30 +307,49 @@ def api_dashboard(request):
               :data:`tracking.services.EMPRESAS`.
 
     Returns:
-        JsonResponse con el resumen de ocupación, o con un error 400 si
-        las fechas o la empresa no son válidas.
+        JsonResponse con el resumen de ocupación, un error 400 si las
+        fechas o la empresa no son válidas, o un 403 si el usuario no
+        tiene acceso a la empresa pedida.
     """
     desde = request.GET.get('desde') or None
     hasta = request.GET.get('hasta') or None
     for f in (desde, hasta):
         if f and not FECHA_RE.match(f):
             return JsonResponse({'error': 'Fecha inválida, usa YYYY-MM-DD'}, status=400)
+    # Aquí es donde de verdad se reparte el acceso: ocultar una pestaña en la
+    # plantilla no sirve de nada si el JSON responde a cualquiera que escriba
+    # ?empresa=DITAR a mano en la barra del navegador.
+    permitidas = _empresas_permitidas(request)
     empresa = (request.GET.get('empresa') or '').strip().upper() or None
     if empresa and empresa not in services.EMPRESAS:
         return JsonResponse(
-            {'error': f'Empresa inválida: {empresa}. Usa una de {", ".join(services.EMPRESAS)}.'},
+            {'error': f'Empresa inválida: {empresa}. Usa una de {", ".join(permitidas)}.'},
             status=400,
         )
-    return _json_api(lambda: services.range_summary(desde, hasta, empresa))
+    if empresa and empresa not in permitidas:
+        return JsonResponse(
+            {'error': f'Tu usuario no tiene acceso a los viajes de {empresa}.'},
+            status=403,
+        )
+    # Sin empresa (pestaña «Todas») se consulta el total del usuario, no el de
+    # la flota: para PROCAPS, sus viajes más los sin identificar.
+    return _json_api(lambda: services.range_summary(desde, hasta, empresa, permitidas))
 
 
 def api_fleet(request):
     """Endpoint JSON con el estado en vivo de toda la flota.
 
+    Reservado a los usuarios con acceso total, igual que la página del
+    mapa que lo consume (ver :func:`fleet_dashboard`).
+
     Args:
         request: El HttpRequest entrante.
 
     Returns:
-        JsonResponse con el resultado de :func:`tracking.services.fleet_summary`.
+        JsonResponse con el resultado de :func:`tracking.services.fleet_summary`,
+        o un error 403 si el usuario no tiene acceso total.
     """
+    if not tiene_acceso_total(request):
+        return JsonResponse(
+            {'error': 'Tu usuario no tiene acceso al mapa de flota.'}, status=403)
     return _json_api(services.fleet_summary)

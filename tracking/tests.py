@@ -12,12 +12,13 @@ Ejecutar con::
 from datetime import date, datetime
 from unittest.mock import patch
 
+from django.conf import settings
 from django.core.cache import cache
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from . import services, views
-from .middleware import CLAVE_SESION
+from .middleware import CLAVE_SESION, CLAVE_USUARIO
 
 
 def _alerta(equipo, hora, geocerca, fecha='2026-07-20', fuera=False):
@@ -102,6 +103,32 @@ class TabDeEmpresaTests(TestCase):
 
     def test_todas_las_pestanas_tienen_etiqueta(self):
         self.assertEqual(sorted(services.ETIQUETA_EMPRESA), sorted(services.EMPRESAS))
+
+
+class TabsPermitidasTests(TestCase):
+    """De las empresas de un usuario a las pestañas que ve."""
+
+    def test_sin_restriccion_ve_todo(self):
+        self.assertEqual(services.tabs_permitidas(None), list(services.EMPRESAS))
+
+    def test_una_empresa_ve_la_suya_y_sin_identificar(self):
+        """Lo no atribuible va en todas las ventanas, sea de quien sea."""
+        self.assertEqual(services.tabs_permitidas(['PROCAPS']),
+                         ['PROCAPS', services.TAB_SIN_IDENTIFICAR])
+        self.assertEqual(services.tabs_permitidas(['DITAR']),
+                         ['DITAR', services.TAB_SIN_IDENTIFICAR])
+
+    def test_no_ve_las_de_los_demas(self):
+        self.assertNotIn('DITAR', services.tabs_permitidas(['PROCAPS']))
+        self.assertNotIn('RELIANZ', services.tabs_permitidas(['PROCAPS']))
+
+    def test_respeta_el_orden_del_catalogo(self):
+        self.assertEqual(services.tabs_permitidas(['RELIANZ', 'PROCAPS']),
+                         ['PROCAPS', 'RELIANZ', services.TAB_SIN_IDENTIFICAR])
+
+    def test_ignora_nombres_que_no_existen(self):
+        self.assertEqual(services.tabs_permitidas(['INVENTADA']),
+                         [services.TAB_SIN_IDENTIFICAR])
 
 
 class EntradaGeocercaTests(TestCase):
@@ -210,6 +237,38 @@ class RangeSummaryTests(TestCase):
         self.assertEqual(ditar['vehiculos'][0]['servicios'], 1)
         self.assertEqual(ditar['vehiculos'][0]['timbradas'], 1)
 
+    def test_todas_respeta_el_techo_del_usuario(self, eventos, vehiculos, alertas):
+        """Sin empresa elegida, un usuario de PROCAPS no suma viajes de DITAR."""
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
+                                _alerta('100', '14:00:00', 'DITAR')]
+        eventos.side_effect = lambda equipo, *a, **k: [
+            {'fecha': '2026-07-20', 'hora': '07:00:00', 'pasajero': 'a'},   # -> PROCAPS
+            {'fecha': '2026-07-20', 'hora': '13:00:00', 'pasajero': 'b'},   # -> DITAR
+        ]
+
+        r = services.range_summary('2026-07-20', '2026-07-20', None,
+                                   services.tabs_permitidas(['PROCAPS']))
+
+        self.assertEqual(r['vehiculos'][0]['servicios'], 1)
+        self.assertEqual(r['vehiculos'][0]['timbradas'], 1)
+        # El JSON tampoco nombra las empresas que el usuario no puede ver.
+        self.assertEqual(r['empresas'], ['PROCAPS', services.TAB_SIN_IDENTIFICAR])
+        self.assertNotIn('DITAR', r['etiquetas'])
+
+    def test_lo_sin_identificar_va_en_todas_las_ventanas(self, eventos,
+                                                        vehiculos, alertas):
+        """Un viaje sin empresa lo ve cualquier usuario, no solo el admin."""
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = []          # sin servicios: nada que atribuir
+        eventos.side_effect = lambda equipo, *a, **k: [
+            {'fecha': '2026-07-20', 'hora': '09:00:00', 'pasajero': 'a'}]
+
+        for empresa in ('PROCAPS', 'DITAR', 'RELIANZ'):
+            r = services.range_summary('2026-07-20', '2026-07-20', None,
+                                       services.tabs_permitidas([empresa]))
+            self.assertEqual(r['vehiculos'][0]['timbradas'], 1, empresa)
+
     def test_las_timbradas_sin_servicio_caen_en_sin_identificar(self, eventos,
                                                                 vehiculos, alertas):
         """Si el bus no entró a ninguna geocerca, su timbrada no se pierde."""
@@ -269,7 +328,6 @@ class SinBaseDeDatosTests(TestCase):
     """
 
     def test_la_sesion_va_en_cookie_firmada(self):
-        from django.conf import settings
         self.assertEqual(settings.SESSION_ENGINE,
                          'django.contrib.sessions.backends.signed_cookies')
 
@@ -277,12 +335,12 @@ class SinBaseDeDatosTests(TestCase):
         """Iniciar sesión no debe ejecutar ni una sola consulta SQL."""
         with self.assertNumQueries(0):
             r = self.client.post(reverse('tracking:login'),
-                                 {'usuario': '1234', 'clave': '1234'})
+                                 {'usuario': 'admin', 'clave': 'Admin'})
         self.assertEqual(r.status_code, 302)
 
     def test_ver_el_dashboard_no_escribe_en_la_base_de_datos(self):
         self.client.post(reverse('tracking:login'),
-                         {'usuario': '1234', 'clave': '1234'})
+                         {'usuario': 'admin', 'clave': 'Admin'})
         with self.assertNumQueries(0):
             self.client.get(reverse('tracking:dashboard'))
 
@@ -326,7 +384,7 @@ class PrecalentamientoTests(TestCase):
     @patch.object(views, 'threading')
     def test_con_sesion_iniciada_no_precalienta(self, hilos):
         """Con sesión, /entrar/ redirige antes de llegar al precalentamiento."""
-        self.client.post(self.login_url, {'usuario': '1234', 'clave': '1234'})
+        self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
         self.client.get(self.login_url)
         hilos.Thread.assert_not_called()
 
@@ -375,13 +433,13 @@ class LoginTests(TestCase):
         self.assertNotContains(r, '>Salir<')
 
     def test_credenciales_correctas(self):
-        r = self.client.post(self.login_url, {'usuario': '1234', 'clave': '1234'})
+        r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
         self.assertRedirects(r, reverse('tracking:dashboard'),
                              fetch_redirect_response=False)
         self.assertTrue(self.client.session.get(CLAVE_SESION))
 
     def test_credenciales_incorrectas(self):
-        r = self.client.post(self.login_url, {'usuario': '1234', 'clave': 'mala'})
+        r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'mala'})
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'incorrectos')
         self.assertFalse(self.client.session.get(CLAVE_SESION))
@@ -389,18 +447,18 @@ class LoginTests(TestCase):
     def test_respeta_next(self):
         destino = reverse('tracking:fleet')
         r = self.client.post(self.login_url,
-                             {'usuario': '1234', 'clave': '1234', 'next': destino})
+                             {'usuario': 'admin', 'clave': 'Admin', 'next': destino})
         self.assertRedirects(r, destino, fetch_redirect_response=False)
 
     def test_no_sirve_de_trampolin_a_otro_sitio(self):
         r = self.client.post(self.login_url, {
-            'usuario': '1234', 'clave': '1234',
+            'usuario': 'admin', 'clave': 'Admin',
             'next': 'https://sitio-malo.example/x'})
         self.assertRedirects(r, reverse('tracking:dashboard'),
                              fetch_redirect_response=False)
 
     def test_salir_cierra_la_sesion_solo_por_post(self):
-        self.client.post(self.login_url, {'usuario': '1234', 'clave': '1234'})
+        self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
         salir = reverse('tracking:logout')
 
         self.client.get(salir)   # un GET no debe cerrar nada
@@ -413,7 +471,7 @@ class LoginTests(TestCase):
         for _ in range(views.MAX_INTENTOS):
             self.client.post(self.login_url, {'usuario': 'x', 'clave': 'y'})
         # Ahora ni la contraseña buena entra.
-        r = self.client.post(self.login_url, {'usuario': '1234', 'clave': '1234'})
+        r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
         self.assertContains(r, 'Demasiados intentos')
         self.assertFalse(self.client.session.get(CLAVE_SESION))
 
@@ -421,6 +479,116 @@ class LoginTests(TestCase):
         """El middleware no debe secuestrar /admin/, que ya se autentica solo."""
         r = self.client.get('/admin/')
         self.assertNotIn(self.login_url, r.headers.get('Location', ''))
+
+
+class AccesoPorEmpresaTests(TestCase):
+    """Cada usuario entra a lo suyo y nada más.
+
+    Los cuatro usuarios viven en ``settings.DASHBOARD_USUARIOS``; aquí se
+    prueba que el reparto se aplique de verdad, tanto en las pestañas que
+    se dibujan como en el endpoint JSON (que es lo único que importa: la
+    plantilla se puede saltar escribiendo la URL a mano).
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.login_url = reverse('tracking:login')
+        parche = patch.object(views, '_lanzar_precalentamiento',
+                              return_value=False)
+        parche.start()
+        self.addCleanup(parche.stop)
+
+    def entrar(self, usuario, clave):
+        return self.client.post(self.login_url, {'usuario': usuario, 'clave': clave})
+
+    def test_los_cuatro_usuarios_entran(self):
+        for usuario, clave in (('admin', 'Admin'), ('procaps', 'Procaps'),
+                               ('ditar', 'Ditar'), ('relianz', 'relianz')):
+            self.client.post(reverse('tracking:logout'))
+            cache.clear()                       # el freno de intentos por IP
+            self.entrar(usuario, clave)
+            self.assertEqual(self.client.session.get(CLAVE_USUARIO), usuario)
+
+    def test_el_usuario_no_distingue_mayusculas_pero_la_clave_si(self):
+        self.entrar('PROCAPS', 'Procaps')       # nombre en mayúsculas: entra
+        self.assertEqual(self.client.session.get(CLAVE_USUARIO), 'procaps')
+
+        self.client.post(reverse('tracking:logout'))
+        self.entrar('procaps', 'procaps')       # clave en minúsculas: no entra
+        self.assertFalse(self.client.session.get(CLAVE_SESION))
+
+    def test_cada_usuario_dibuja_solo_sus_pestanas(self):
+        casos = {
+            'procaps': ('PROCAPS', ('DITAR', 'RELIANZ')),
+            'ditar':   ('DITAR', ('PROCAPS', 'RELIANZ')),
+            'relianz': ('RELIANZ', ('PROCAPS', 'DITAR')),
+        }
+        for usuario, (propia, ajenas) in casos.items():
+            self.client.post(reverse('tracking:logout'))
+            cache.clear()
+            self.entrar(usuario, {'procaps': 'Procaps', 'ditar': 'Ditar',
+                                  'relianz': 'relianz'}[usuario])
+            r = self.client.get(reverse('tracking:dashboard'))
+            self.assertContains(r, f'data-empresa="{propia}"')
+            # «Sin identificar» va en todas las ventanas.
+            self.assertContains(r, f'data-empresa="{services.TAB_SIN_IDENTIFICAR}"')
+            for ajena in ajenas:
+                self.assertNotContains(r, f'data-empresa="{ajena}"')
+
+    def test_el_admin_dibuja_todas_las_pestanas(self):
+        self.entrar('admin', 'Admin')
+        r = self.client.get(reverse('tracking:dashboard'))
+        for valor in services.EMPRESAS:
+            self.assertContains(r, f'data-empresa="{valor}"')
+
+    def test_el_json_rechaza_la_empresa_ajena(self):
+        """Ocultar la pestaña no basta: la URL se puede escribir a mano."""
+        self.entrar('procaps', 'Procaps')
+        r = self.client.get(reverse('tracking:api_dashboard'), {'empresa': 'DITAR'})
+        self.assertEqual(r.status_code, 403)
+        self.assertIn('no tiene acceso', r.json()['error'])
+
+    def test_el_json_acepta_la_empresa_propia_y_la_sin_identificar(self):
+        self.entrar('procaps', 'Procaps')
+        with patch.object(services, 'range_summary', return_value={}) as resumen:
+            for empresa in ('PROCAPS', services.TAB_SIN_IDENTIFICAR):
+                r = self.client.get(reverse('tracking:api_dashboard'),
+                                    {'empresa': empresa})
+                self.assertEqual(r.status_code, 200, empresa)
+        self.assertEqual(resumen.call_count, 2)
+
+    def test_el_json_le_pasa_el_techo_del_usuario_a_services(self):
+        """Sin empresa, «Todas» tiene que seguir siendo "todas las suyas"."""
+        self.entrar('ditar', 'Ditar')
+        with patch.object(services, 'range_summary', return_value={}) as resumen:
+            self.client.get(reverse('tracking:api_dashboard'),
+                            {'desde': '2026-07-20', 'hasta': '2026-07-20'})
+        resumen.assert_called_once_with(
+            '2026-07-20', '2026-07-20', None,
+            ['DITAR', services.TAB_SIN_IDENTIFICAR])
+
+    def test_el_mapa_de_flota_es_solo_del_admin(self):
+        """El mapa muestra la flota entera, que no está repartida por empresa."""
+        self.entrar('relianz', 'relianz')
+        r = self.client.get(reverse('tracking:fleet'))
+        self.assertRedirects(r, reverse('tracking:dashboard'),
+                             fetch_redirect_response=False)
+        r = self.client.get(reverse('tracking:api_fleet'))
+        self.assertEqual(r.status_code, 403)
+
+    def test_el_admin_si_ve_el_mapa(self):
+        self.entrar('admin', 'Admin')
+        self.assertEqual(self.client.get(reverse('tracking:fleet')).status_code, 200)
+
+    def test_quitar_un_usuario_del_catalogo_cierra_su_sesion(self):
+        """Los permisos se releen del catálogo, no se guardan en la cookie."""
+        self.entrar('procaps', 'Procaps')
+        catalogo = {k: v for k, v in settings.DASHBOARD_USUARIOS.items()
+                    if k != 'procaps'}
+        with self.settings(DASHBOARD_USUARIOS=catalogo):
+            r = self.client.get(reverse('tracking:dashboard'))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn(self.login_url, r.headers['Location'])
 
 
 class PestanaTests(TestCase):
@@ -443,7 +611,7 @@ class PestanaTests(TestCase):
         self.addCleanup(parche.stop)
 
     def entrar(self):
-        self.client.post(self.login_url, {'usuario': '1234', 'clave': '1234'})
+        self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
 
     def test_la_pagina_de_entrada_sella_la_pestana(self):
         self.entrar()
@@ -462,7 +630,7 @@ class PestanaTests(TestCase):
         """Con ?next=/mapa/ la página de entrada es el mapa, no el dashboard."""
         destino = reverse('tracking:fleet')
         self.client.post(self.login_url,
-                         {'usuario': '1234', 'clave': '1234', 'next': destino})
+                         {'usuario': 'admin', 'clave': 'Admin', 'next': destino})
         r = self.client.get(destino)
         self.assertTrue(r.context['sesion_nueva'])
 
@@ -481,7 +649,7 @@ class PestanaTests(TestCase):
         cliente = Client(enforce_csrf_checks=True)
         cliente.get(self.login_url)      # deja la cookie csrftoken
         cliente.post(self.login_url, {
-            'usuario': '1234', 'clave': '1234',
+            'usuario': 'admin', 'clave': 'Admin',
             'csrfmiddlewaretoken': cliente.cookies['csrftoken'].value})
         self.assertTrue(cliente.session.get(CLAVE_SESION))
 
@@ -508,7 +676,7 @@ class DashboardTests(TestCase):
     def setUp(self):
         cache.clear()
         self.client.post(reverse('tracking:login'),
-                         {'usuario': '1234', 'clave': '1234'})
+                         {'usuario': 'admin', 'clave': 'Admin'})
 
     def test_dibuja_una_pestana_por_empresa(self):
         r = self.client.get(reverse('tracking:dashboard'))

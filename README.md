@@ -86,21 +86,64 @@ GPS_PASSWORD=...
 DJANGO_SECRET_KEY=...
 DJANGO_DEBUG=1                  # 1 solo en desarrollo
 
-DASHBOARD_USER=1234             # acceso al dashboard
-DASHBOARD_PASSWORD=1234
+DASHBOARD_CLAVE_ADMIN=...       # opcional: cambia la clave de un usuario
+DASHBOARD_CLAVE_PROCAPS=...     #           sin tocar el código
+DASHBOARD_CLAVE_DITAR=...
+DASHBOARD_CLAVE_RELIANZ=...
 ```
 
-> ⚠️ `DASHBOARD_USER` / `DASHBOARD_PASSWORD` traen `1234` por defecto para poder
-> entrar de una vez. El sitio es público: **cámbialos en el `.env` de
-> producción**. `DJANGO_DEBUG` por defecto está apagado, para que un servidor
-> sin la variable no muestre el código y las credenciales al primer error.
+> ⚠️ Las contraseñas por defecto están en el repositorio y el sitio es público:
+> para producción escribe las cuatro variables `DASHBOARD_CLAVE_*` en el `.env`
+> (que no se sube a git). `DJANGO_DEBUG` por defecto está apagado, para que un
+> servidor sin la variable no muestre el código y las credenciales al primer
+> error.
 
 ## Acceso
 
 El dashboard entero (páginas y endpoints JSON) exige iniciar sesión en
-`/entrar/`. No hay usuarios en base de datos: se compara contra las dos
-variables de arriba. Tras 5 intentos fallidos desde la misma IP el login se
-bloquea 60 segundos. `/admin/` conserva su propio login de Django.
+`/entrar/`. No hay usuarios en base de datos: **el catálogo de usuarios es
+`DASHBOARD_USUARIOS` en `config/settings.py`**, y ahí se agregan y se quitan.
+Tras 5 intentos fallidos desde la misma IP el login se bloquea 60 segundos.
+`/admin/` conserva su propio login de Django.
+
+### Usuarios y qué ve cada uno
+
+| Usuario | Contraseña | Ve los viajes de | Mapa `/mapa/` |
+|---|---|---|---|
+| `admin` | `Admin` | Todas las empresas | Sí |
+| `procaps` | `Procaps` | PROCAPS + Sin identificar | No |
+| `ditar` | `Ditar` | DITAR + Sin identificar | No |
+| `relianz` | `relianz` | RELIANZ + Sin identificar | No |
+
+El nombre de usuario **no** distingue mayúsculas (`Procaps` = `procaps`); la
+contraseña **sí**.
+
+**Los viajes sin empresa se muestran en todas las ventanas.** La pestaña «Sin
+identificar» se le agrega a todo usuario, porque ahí cae lo que no se pudo
+atribuir a nadie y hoy es casi toda la actividad de DITAR y RELIANZ (sus
+geocercas no existen todavía). Sin eso, esos dos usuarios verían el dashboard
+vacío.
+
+Para un usuario restringido, la pestaña «Todas» significa *todas las suyas*: un
+usuario de PROCAPS nunca ve viajes de DITAR, ni siquiera sumados en un total.
+
+El reparto se aplica en dos capas, y la que manda es la segunda:
+
+| Capa | Dónde | Qué hace |
+|---|---|---|
+| Pestañas | `views.dashboard` | Solo dibuja las empresas permitidas. |
+| Datos | `views.api_dashboard` | Responde `403` a `?empresa=` de otra empresa, y limita el total a las permitidas. |
+
+Ocultar la pestaña no protege nada por sí solo: la URL del JSON se puede
+escribir a mano. Por eso el techo del usuario se le pasa siempre a
+`services.range_summary`.
+
+Para agregar un usuario nuevo basta con una línea en `DASHBOARD_USUARIOS`:
+
+```python
+'nuevo': {'clave': os.getenv('DASHBOARD_CLAVE_NUEVO', 'clave'),
+          'empresas': ('PROCAPS', 'DITAR')},   # None = acceso total
+```
 
 **La sesión dura lo que dure la pestaña.** Al cerrarla (o cerrar el navegador)
 hay que volver a escribir usuario y contraseña; recargar o navegar dentro de la
@@ -121,7 +164,7 @@ antes de que la persona elija un rango.
 python manage.py test
 ```
 
-47 pruebas que **no tocan la red**: el API se simula con `mock`, así que corren
+70 pruebas que **no tocan la red**: el API se simula con `mock`, así que corren
 sin credenciales y en un par de segundos.
 
 ---
@@ -163,13 +206,14 @@ config/            settings, urls y wsgi del proyecto Django
 tracking/
   api_client.py    cliente del WebService (token, cache, reintentos)
   services.py      lógica de negocio: servicios, timbradas, ocupación
-  views.py         páginas y endpoints JSON + login
+  views.py         páginas y endpoints JSON + login + reparto por empresa
   middleware.py    exige sesión iniciada en todo el sitio
   tests.py         pruebas (API simulado)
   templates/       base, dashboard, flota y acceso
 ```
 
-El dashboard de mapa en vivo existe en `/mapa/` pero no está en el menú.
+El dashboard de mapa en vivo existe en `/mapa/` pero no está en el menú, y es
+solo para `admin`: muestra la flota completa, que no está repartida por empresa.
 
 ## Despliegue (Render)
 
@@ -192,7 +236,7 @@ Variables de entorno que hay que poner en Render:
 | `DJANGO_DEBUG` | **`0`.** Con `1`, cualquier error muestra el código, las variables locales y las credenciales a quien entre. |
 | `DJANGO_SECRET_KEY` | Firma la cookie de sesión. Si falta, se usa la clave de ejemplo que está en el repo y **cualquiera podría fabricarse una sesión válida**. |
 | `GPS_APIKEY`, `GPS_USERNAME`, `GPS_PASSWORD` | Acceso al WebService. |
-| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Acceso al dashboard (por defecto `1234`/`1234`). |
+| `DASHBOARD_CLAVE_ADMIN`, `DASHBOARD_CLAVE_PROCAPS`, `DASHBOARD_CLAVE_DITAR`, `DASHBOARD_CLAVE_RELIANZ` | Contraseñas del dashboard. Sin ellas se usan las del repositorio, que **cualquiera puede leer en GitHub**. |
 
 ## Licencia
 

@@ -182,6 +182,50 @@ def tab_de_empresa(empresa):
     return empresa if empresa in EMPRESAS else TAB_SIN_IDENTIFICAR
 
 
+def tabs_permitidas(empresas):
+    """Traduce las empresas de un usuario a las pestañas que puede ver.
+
+    A todo usuario se le agrega :data:`TAB_SIN_IDENTIFICAR`, sin importar
+    su empresa. Ahí cae lo que no se pudo atribuir a nadie (el bus no
+    entró a ninguna geocerca ese día, o entró a una con un nombre que no
+    corresponde a ninguna empresa), y como hoy la única geocerca creada
+    es la de PROCAPS, casi toda la actividad de DITAR y RELIANZ está en
+    esa pestaña: sin ella sus usuarios verían el dashboard vacío.
+
+    Args:
+        empresas: Colección de empresas del usuario (valores de
+            :data:`EMPRESAS`), o None para acceso total.
+
+    Returns:
+        Lista de pestañas permitidas, en el orden de :data:`EMPRESAS`.
+        Los nombres que no correspondan a ninguna pestaña se ignoran.
+    """
+    if empresas is None:
+        return list(EMPRESAS)
+    elegidas = {str(e).strip().upper() for e in empresas}
+    elegidas.add(TAB_SIN_IDENTIFICAR)
+    return [e for e in EMPRESAS if e in elegidas]
+
+
+def _filtro_de_tabs(empresa, permitidas):
+    """Decide qué pestañas entran en el cálculo de una consulta.
+
+    Args:
+        empresa: Pestaña elegida por el usuario, o None para "todas"
+            (todas las suyas, no todas las que existen).
+        permitidas: Pestañas a las que el usuario tiene acceso, o None si
+            las tiene todas.
+
+    Returns:
+        Conjunto de pestañas a contar, o None para no filtrar nada.
+    """
+    if empresa:
+        return {empresa}
+    if permitidas is None:
+        return None
+    return set(permitidas)
+
+
 def fleet_summary():
     """Construye el resumen en vivo de toda la flota para el mapa.
 
@@ -381,7 +425,7 @@ def _lista_dias(desde, hasta):
     return [(d1 + timedelta(days=n)).isoformat() for n in range((d2 - d1).days + 1)]
 
 
-def range_summary(desde=None, hasta=None, empresa=None):
+def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
     """Calcula la ocupación de pasajeros por vehículo en un rango de fechas.
 
     Para cada vehículo de la flota, cuenta cuántos servicios (entradas
@@ -389,6 +433,11 @@ def range_summary(desde=None, hasta=None, empresa=None):
     eso estima el porcentaje de ocupación (timbradas / (servicios *
     capacidad)). Si se indica ``empresa``, todo se filtra a esa empresa
     usando la atribución de :func:`_empresa_de_timbrada`.
+
+    ``permitidas`` es el techo del usuario que consulta: sin ``empresa``
+    (pestaña «Todas») se cuentan todas SUS pestañas, no las de la flota
+    entera. Así un usuario de PROCAPS nunca ve viajes de DITAR, ni
+    siquiera sumados en un total.
 
     Como optimización, cuando el rango cae dentro del mes en curso se
     reutiliza una sola consulta de eventos de todo el mes (cacheada por
@@ -400,7 +449,10 @@ def range_summary(desde=None, hasta=None, empresa=None):
         hasta: Fecha final del rango, en formato ``YYYY-MM-DD``. Si es
             None, se usa el día de hoy.
         empresa: Uno de los valores de :data:`EMPRESAS` para filtrar el
-            resultado a una sola empresa, o None para incluir todas.
+            resultado a una sola empresa, o None para incluir todas las
+            permitidas.
+        permitidas: Pestañas a las que el usuario tiene acceso (ver
+            :func:`tabs_permitidas`), o None si las tiene todas.
 
     Las consultas al API (una por día y una por vehículo) se lanzan en
     paralelo; las cuentas se hacen después, en orden, para que el
@@ -422,6 +474,8 @@ def range_summary(desde=None, hasta=None, empresa=None):
     if desde > hasta:
         desde, hasta = hasta, desde
     dias = _lista_dias(desde, hasta)
+    # Qué pestañas entran en las cuentas: la elegida, o todas las del usuario.
+    filtro = _filtro_de_tabs(empresa, permitidas)
 
     vehicles = api_client.get_vehicles()
     primer_dia_mes = hoy[:8] + '01'
@@ -439,7 +493,7 @@ def range_summary(desde=None, hasta=None, empresa=None):
     for d, servicios_del_dia in zip(dias_consultables, servicios_por_dia):
         for s in servicios_del_dia:
             servicios_bus_dia[(s['equipo'], d)].append((s['hora'], s['empresa']))
-            if empresa is None or tab_de_empresa(s['empresa']) == empresa:
+            if filtro is None or tab_de_empresa(s['empresa']) in filtro:
                 servicios[s['equipo']] += 1
 
     # Un vehículo = una consulta de timbradas; también en paralelo.
@@ -465,9 +519,9 @@ def range_summary(desde=None, hasta=None, empresa=None):
             for e in ev_rango
         ]
         sin_empresa += sum(1 for e in emp_por_timbrada if e is None)
-        if empresa is not None:
+        if filtro is not None:
             ev_rango = [e for e, emp in zip(ev_rango, emp_por_timbrada)
-                        if tab_de_empresa(emp) == empresa]
+                        if tab_de_empresa(emp) in filtro]
 
         timbradas = len(ev_rango)
         n_servicios = servicios.get(str(equipo), 0)
@@ -495,13 +549,16 @@ def range_summary(desde=None, hasta=None, empresa=None):
     internos = [v['interno'] for v in vehiculos]
     porcentajes = [v['ocupacion'] for v in vehiculos if v['ocupacion'] is not None]
     ocupacion_flota = round(sum(porcentajes) / len(porcentajes)) if porcentajes else None
+    # Los catálogos que vuelven al navegador son los del usuario, no los de la
+    # flota entera: así el JSON no nombra siquiera las empresas que no puede ver.
+    tabs = list(EMPRESAS) if permitidas is None else list(permitidas)
     return {
         'desde': desde,
         'hasta': hasta,
         'hoy': hoy,
         'empresa': empresa,
-        'empresas': list(EMPRESAS),
-        'etiquetas': dict(ETIQUETA_EMPRESA),
+        'empresas': tabs,
+        'etiquetas': {e: ETIQUETA_EMPRESA[e] for e in tabs},
         'timbradas_inferidas': sin_empresa,
         # Unidades cuyas timbradas no se pudieron leer: sus cifras salen
         # incompletas y el dashboard lo avisa en vez de mostrar un 0 limpio.

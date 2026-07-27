@@ -179,8 +179,10 @@ Cómo funciona:
 
 {% block content %}
 <!-- Pestañas de empresa: cada servicio pertenece a un cliente distinto y se
-     reconoce por el nombre de su geocerca. Se dibujan desde services.EMPRESAS
-     (que llega en el contexto) para no repetir la lista en dos sitios. -->
+     reconoce por el nombre de su geocerca. Llegan en el contexto ya filtradas
+     a lo que el usuario puede ver (views.dashboard), así que un usuario de
+     PROCAPS solo dibuja PROCAPS y «Sin identificar». «Todas» significa
+     entonces "todas las mías": el endpoint JSON aplica el mismo techo. -->
 <div class="tabs" id="tabs-empresa">
   <button class="activa" data-empresa="">Todas</button>
   {% for e in empresas %}
