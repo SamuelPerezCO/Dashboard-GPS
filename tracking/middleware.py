@@ -95,8 +95,9 @@ def tiene_acceso_total(request):
 class LoginRequeridoMiddleware:
     """Redirige al login cualquier petición sin sesión iniciada.
 
-    Quedan libres el propio login, el panel ``/admin/`` (que tiene su
-    propio inicio de sesión) y los archivos estáticos.
+    Quedan libres la portada pública, el propio login, el panel
+    ``/admin/`` (que tiene su propio inicio de sesión) y los archivos
+    estáticos.
     """
 
     def __init__(self, get_response):
@@ -118,6 +119,10 @@ class LoginRequeridoMiddleware:
         Returns:
             True si la ruta está exenta de pedir sesión.
         """
+        # La portada se compara COMPLETA, no por prefijo: es '/', y por
+        # prefijo dejaría libre el sitio entero.
+        if path == reverse('tracking:home'):
+            return True
         exentas = (
             reverse('tracking:login'),
             '/admin/',                        # tiene su propio login

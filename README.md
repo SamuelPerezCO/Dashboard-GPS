@@ -71,7 +71,8 @@ pip install -r requirements.txt
 python manage.py runserver
 ```
 
-El dashboard queda en <http://localhost:8000/>.
+La portada pública queda en <http://localhost:8000/> y el dashboard en
+<http://localhost:8000/dashboard/>.
 
 ## Configuración (`.env`)
 
@@ -98,10 +99,40 @@ DASHBOARD_CLAVE_RELIANZ=...
 > servidor sin la variable no muestre el código y las credenciales al primer
 > error.
 
+---
+
+## La portada pública (`/`)
+
+La raíz del sitio es una **copia de <https://www.rastrelital.com>**: los mismos
+textos, imágenes y colores, pero maquetada a mano (el original es WordPress con
+Porto + Visual Composer + Revolution Slider). Vive en
+`tracking/templates/tracking/home.html`, es contenido fijo —no consulta el API—
+y sus imágenes están descargadas en `tracking/static/tracking/site/`, así que no
+depende del servidor del otro sitio.
+
+Lo único que se le agregó al diseño original: **al lado del botón azul «Inicio
+de Sesión» va un botón ámbar «DASHBOARD»** que lleva a `/dashboard/`. Sin sesión
+iniciada, el middleware lo desvía al formulario de acceso y de ahí vuelve solo
+al dashboard.
+
+El botón azul conserva lo que hace en el sitio real: despliega las plataformas
+externas de Rastrelital (rastreo y combustible), que no son parte de este
+proyecto.
+
+| Ruta | Qué es | ¿Pide sesión? |
+|---|---|---|
+| `/` | Portada pública (copia del sitio) | No |
+| `/entrar/` | Formulario de acceso | No |
+| `/dashboard/` | Dashboard de ocupación | Sí |
+| `/mapa/` | Mapa de flota en vivo | Sí (solo `admin`) |
+| `/api/dashboard/`, `/api/fleet/` | JSON de cada página | Sí |
+
+---
+
 ## Acceso
 
 El dashboard entero (páginas y endpoints JSON) exige iniciar sesión en
-`/entrar/`. No hay usuarios en base de datos: **el catálogo de usuarios es
+`/entrar/`. La portada es la única página que se ve sin sesión. No hay usuarios en base de datos: **el catálogo de usuarios es
 `DASHBOARD_USUARIOS` en `config/settings.py`**, y ahí se agregan y se quitan.
 Tras 5 intentos fallidos desde la misma IP el login se bloquea 60 segundos.
 `/admin/` conserva su propio login de Django.
@@ -207,9 +238,10 @@ tracking/
   api_client.py    cliente del WebService (token, cache, reintentos)
   services.py      lógica de negocio: servicios, timbradas, ocupación
   views.py         páginas y endpoints JSON + login + reparto por empresa
-  middleware.py    exige sesión iniciada en todo el sitio
+  middleware.py    exige sesión iniciada en todo el sitio menos la portada
   tests.py         pruebas (API simulado)
-  templates/       base, dashboard, flota y acceso
+  templates/       portada, base, dashboard, flota y acceso
+  static/tracking/site/   imágenes de la portada (copiadas del sitio)
 ```
 
 El dashboard de mapa en vivo existe en `/mapa/` pero no está en el menú, y es

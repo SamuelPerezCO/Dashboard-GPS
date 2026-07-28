@@ -1,0 +1,829 @@
+<!doctype html>
+{% load static %}
+{% comment %}
+=============================================================================
+ PORTADA PÚBLICA — copia del sitio www.rastrelital.com
+=============================================================================
+Es la única página del proyecto que se ve SIN iniciar sesión (junto con el
+formulario de acceso); así lo permite tracking/middleware.py.
+
+No extiende base.html a propósito: base.html es el "chrome" del dashboard
+(barra con el cliente, el usuario y el botón de salir, paleta clara/oscura,
+guardia de pestaña). Aquí no hay sesión que mostrar ni que vigilar, y el
+diseño es el del sitio comercial, no el de la herramienta interna. Mezclar
+los dos obligaría a vaciar casi todos los bloques de la base.
+
+Contenido, textos e imágenes copiados de www.rastrelital.com; las imágenes
+viven en tracking/static/tracking/site/ para no depender del otro servidor.
+La maquetación se rehízo con CSS propio (el original es WordPress + Porto +
+Visual Composer + Revolution Slider, unos 2 MB de plugins).
+
+DIFERENCIA CON EL SITIO ORIGINAL: al lado del botón azul «Inicio de Sesión»
+va el botón ámbar «DASHBOARD», que es la puerta a este proyecto. Sin sesión,
+el middleware lo manda al formulario de acceso y de ahí vuelve al dashboard.
+=============================================================================
+{% endcomment %}
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inicio — Rastrelital S.A.S | Rastreo satelital GPS</title>
+<meta name="description" content="Brindamos soluciones tecnológicas para facilitar el seguimiento, monitoreo y control de vehículos, personas y mercancías: rastreo satelital GPS, control de combustible, control de temperatura, cámaras de vídeo y más.">
+<link rel="icon" href="{% static 'tracking/site/logo.png' %}">
+{% comment %}
+Las mismas dos tipografías del sitio original (Montserrat para el texto y los
+títulos, Poppins para los subtítulos). Si no cargan —sin internet o con el
+dominio bloqueado— el CSS cae a la tipografía del sistema.
+{% endcomment %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Poppins:wght@600;700&display=swap">
+<style>
+  /* --- Paleta del sitio ------------------------------------------------
+     Los tres colores salen del CSS original: el azul de marca (#4158d0) con
+     el que se pintan las bandas de sección y el botón de sesión, el ámbar
+     (#f8bc36) de los enlaces destacados —y ahora del botón DASHBOARD— y el
+     gris casi negro (#222529) del pie. */
+  :root {
+    --azul:        #4158d0;
+    --azul-oscuro: #384cb3;
+    --ambar:       #f8bc36;
+    --ambar-oscuro:#e5a91f;
+    --tinta:       #222529;
+    --texto:       #212529;
+    --suave:       #f6f6f6;
+    --borde:       #e7e7e7;
+    --ancho:       1140px;
+    --tipo:        Montserrat, "Segoe UI", system-ui, -apple-system, sans-serif;
+    --tipo-titulo: Poppins, Montserrat, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  /* Quien pidió menos animación en su sistema no ve el desplazamiento suave
+     de los enlaces del menú ni los fundidos del carrusel. */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .hero .slide { transition: none; }
+  }
+  /* Tipografía calcada del sitio: Montserrat 17/25 para el texto, títulos
+     muy apretados (-0.05em) y los h2 en azul de marca. */
+  body {
+    margin: 0;
+    background: #fff;
+    color: var(--texto);
+    font-family: var(--tipo);
+    font-size: 17px;
+    line-height: 25px;
+  }
+  img { max-width: 100%; height: auto; }
+  a { color: var(--azul); text-decoration: none; }
+  h1, h2, h3 { letter-spacing: -0.05em; margin: 0 0 14px; }
+  h2 { font-family: var(--tipo); font-weight: 700; font-size: 33px; line-height: 40px; color: var(--azul); }
+  h3 { font-family: var(--tipo-titulo); font-weight: 700; font-size: 25px; line-height: 32px; color: var(--tinta); }
+  .container { max-width: var(--ancho); margin: 0 auto; padding: 0 20px; }
+
+  /* --- Encabezado ------------------------------------------------------ */
+  .site-header {
+    position: sticky; top: 0; z-index: 900;
+    background: #fff; border-bottom: 1px solid var(--borde);
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+  }
+  .header-inner {
+    display: flex; align-items: center; gap: 22px;
+    max-width: var(--ancho); margin: 0 auto; padding: 10px 20px;
+  }
+  .brand { flex: none; display: flex; }
+  .brand img { height: 52px; width: auto; }
+
+  .main-nav ul { list-style: none; margin: 0; padding: 0; }
+  .main-nav > ul { display: flex; align-items: center; gap: 4px; }
+  .main-nav > ul > li { position: relative; }
+  .main-nav > ul > li > a {
+    display: block; padding: 10px 12px;
+    color: var(--tinta); font-weight: 600; font-size: 14px;
+  }
+  .main-nav > ul > li > a:hover,
+  .main-nav > ul > li > a.current { color: var(--azul); }
+  /* La flechita del menú con hijos, dibujada en CSS para no cargar iconos. */
+  .main-nav .has-sub > a::after {
+    content: ""; display: inline-block; margin-left: 7px;
+    border: 4px solid transparent; border-top-color: currentColor;
+    transform: translateY(2px);
+  }
+  .main-nav .sub-menu {
+    position: absolute; top: 100%; left: 0; min-width: 260px;
+    background: #fff; border: 1px solid var(--borde); border-top: 3px solid var(--azul);
+    border-radius: 0 0 4px 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    padding: 8px 0; display: none;
+  }
+  .main-nav li:hover > .sub-menu,
+  .main-nav li:focus-within > .sub-menu { display: block; }
+  .main-nav .sub-menu a {
+    display: block; padding: 8px 18px; color: var(--texto); font-size: 14px;
+  }
+  .main-nav .sub-menu a:hover { background: var(--suave); color: var(--azul); }
+
+  /* --- Los dos botones de la derecha ----------------------------------- */
+  .header-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+
+  /* Botón azul de sesión: mismas medidas que en el sitio original
+     (14pt, padding 10px 30px, radio 22px, #4158d0). */
+  .acceso-menu { position: relative; }
+  .btn-sesion {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--azul); color: #fff; border: none;
+    font: inherit; font-size: 14pt; font-weight: 600;
+    padding: 10px 30px; border-radius: 22px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-sesion:hover { background: var(--azul-oscuro); }
+  .btn-sesion::after {
+    content: ""; border: 5px solid transparent; border-top-color: currentColor;
+    transform: translateY(3px);
+  }
+  .acceso-menu .panel {
+    position: absolute; top: calc(100% + 8px); right: 0; min-width: 300px;
+    background: #fff; border: 1px solid var(--borde); border-top: 3px solid var(--azul);
+    border-radius: 6px; box-shadow: 0 10px 28px rgba(0,0,0,0.15);
+    padding: 10px 0; display: none;
+  }
+  .acceso-menu:hover .panel,
+  .acceso-menu:focus-within .panel,
+  .acceso-menu .panel.abierto { display: block; }
+  .acceso-menu .grupo {
+    display: block; padding: 8px 18px 4px;
+    color: var(--tinta); font-weight: 700; font-size: 13px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .acceso-menu .panel a {
+    display: block; padding: 7px 18px 7px 30px; color: var(--texto); font-size: 14px;
+  }
+  .acceso-menu .panel a:hover { background: var(--suave); color: var(--azul); }
+  .acceso-menu .panel hr { border: none; border-top: 1px solid var(--borde); margin: 8px 0; }
+
+  /* Botón DASHBOARD: el añadido de este proyecto. Va en ámbar —el otro color
+     de la marca— y un punto más grande que el azul, para que se lea como la
+     acción principal sin pelearse con él. */
+  .btn-dashboard {
+    display: inline-flex; align-items: center; gap: 9px;
+    background: var(--ambar); color: var(--tinta);
+    font-size: 15pt; font-weight: 800; letter-spacing: 0.03em;
+    padding: 12px 34px; border-radius: 26px; white-space: nowrap;
+    box-shadow: 0 3px 12px rgba(248,188,54,0.45);
+  }
+  .btn-dashboard:hover { background: var(--ambar-oscuro); color: var(--tinta); }
+  .btn-dashboard svg { flex: none; }
+
+  .mobile-toggle {
+    display: none; margin-left: auto;
+    background: none; border: none; color: var(--tinta);
+    font-size: 26px; line-height: 1; cursor: pointer; padding: 4px 8px;
+  }
+
+  /* --- Carrusel de portada --------------------------------------------- */
+  /* Los tres banners son de 1750x1000 (proporción 1.75), así que el marco usa
+     esa misma proporción y la imagen entra completa, sin recortes. */
+  .hero { position: relative; background: #000; overflow: hidden; }
+  .hero .slides { position: relative; aspect-ratio: 1.75; max-height: 82vh; margin: 0 auto; }
+  .hero .slide {
+    position: absolute; inset: 0; opacity: 0;
+    transition: opacity .8s ease; pointer-events: none;
+  }
+  .hero .slide.activa { opacity: 1; pointer-events: auto; }
+  .hero .slide img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .hero button.flecha {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    background: rgba(34,37,41,0.45); color: #fff; border: none;
+    width: 46px; height: 60px; font-size: 26px; cursor: pointer; opacity: 0;
+    transition: opacity .25s;
+  }
+  .hero:hover button.flecha { opacity: 1; }
+  .hero button.flecha:hover { background: var(--azul); }
+  .hero .prev { left: 0; }
+  .hero .next { right: 0; }
+  .hero .puntos {
+    position: absolute; left: 0; right: 0; bottom: 16px;
+    display: flex; justify-content: center; gap: 9px;
+  }
+  .hero .puntos button {
+    width: 11px; height: 11px; padding: 0; border-radius: 50%; cursor: pointer;
+    background: rgba(255,255,255,0.55); border: 1px solid rgba(0,0,0,0.2);
+  }
+  .hero .puntos button.activa { background: var(--azul); }
+
+  /* --- Bandas de sección ------------------------------------------------ */
+  .banda-azul { background: var(--azul); color: #fff; padding: 70px 0 40px; }
+  .banda-azul h2 { color: #fff; text-align: center; }
+  .seccion { padding: 50px 0; }
+  .seccion > .container > h2 { text-align: center; margin-bottom: 34px; }
+
+  /* Oferta: imagen a la izquierda, texto grande a la derecha. */
+  .oferta { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: center; margin-top: 24px; }
+  .oferta p { font-size: 28px; line-height: 32px; margin: 0; }
+
+  /* --- Soluciones ------------------------------------------------------- */
+  .soluciones { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; }
+  .solucion { text-align: center; display: flex; flex-direction: column; }
+  /* Alto fijo con object-fit para que las nueve imágenes —que vienen en
+     tamaños distintos— dejen los títulos a la misma altura en cada fila. */
+  .solucion img { height: 300px; width: 100%; object-fit: contain; }
+  /* En el sitio original el título de cada tarjeta es un h2 de 22px, o sea
+     azul y en Montserrat; aquí es un h3 por jerarquía, pero se ve igual. */
+  .solucion h3 {
+    font-family: var(--tipo); color: var(--azul);
+    font-size: 22px; line-height: 30px; margin: 18px 0 5px;
+  }
+  .solucion p { margin: 0 0 18px; }
+  .solucion .pie { margin-top: auto; }
+  /* Píldora azul «Ver más», igual que la clase .ver del sitio original. */
+  .ver, .ver2 {
+    display: inline-block; color: #fff; font-size: 14pt; font-weight: 600;
+    padding: 10px 30px; border-radius: 22px; background: var(--azul);
+  }
+  .ver:hover { background: var(--azul-oscuro); }
+  .ver2 { background: var(--ambar); color: var(--tinta); }
+  .ver2:hover { background: var(--ambar-oscuro); }
+
+  /* --- Clientes y certificados ------------------------------------------ */
+  .logos { display: grid; grid-template-columns: repeat(4, 1fr); gap: 26px; align-items: center; margin-top: 26px; }
+  .logos img { max-height: 110px; width: auto; margin: 0 auto; display: block; }
+  .certificados { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; align-items: center; }
+  .certificados img { max-height: 190px; width: auto; margin: 0 auto; display: block; }
+
+  /* --- Preguntas frecuentes --------------------------------------------- */
+  /* Acordeón con <details>: lo abre y lo cierra el navegador, sin JavaScript. */
+  .faq { max-width: 900px; margin: 26px auto 0; }
+  .faq details {
+    background: #fff; color: var(--texto);
+    border: 1px solid var(--borde); border-radius: 6px; margin-bottom: 10px;
+  }
+  .faq summary {
+    list-style: none; cursor: pointer; padding: 14px 46px 14px 18px;
+    color: var(--tinta); font-weight: 700; position: relative;
+  }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after {
+    content: "+"; position: absolute; right: 18px; top: 12px;
+    color: var(--azul); font-size: 22px; line-height: 1;
+  }
+  .faq details[open] summary::after { content: "–"; }
+  .faq details[open] summary { border-bottom: 1px solid var(--borde); }
+  .faq .cuerpo { padding: 14px 18px 18px; }
+  .faq .cuerpo p:first-child { margin-top: 0; }
+  .faq .cuerpo p:last-child { margin-bottom: 0; }
+  .faq ul { margin: 10px 0; padding-left: 20px; }
+  .faq li { margin-bottom: 6px; }
+  .faq .cta-wa { text-align: center; margin: 16px 0 0; }
+
+  /* --- Contacto y pie ---------------------------------------------------- */
+  .contacto { background: var(--suave); padding: 60px 0 50px; text-align: center; }
+  .contacto h2 { font-size: 26px; max-width: 820px; margin: 0 auto 18px; }
+  .contacto h2 + p { margin-top: 0; }
+  .contacto .bloque { margin-bottom: 34px; }
+  .redes { display: flex; justify-content: center; gap: 18px; }
+  .redes img { width: 52px; height: 52px; }
+  .gracias { font-size: 26px; font-weight: 700; color: var(--azul); margin: 0; letter-spacing: -0.05em; }
+  .site-footer { background: var(--tinta); color: #b9bcc2; padding: 22px 0; text-align: center; font-size: 14px; }
+
+  /* --- Móvil -------------------------------------------------------------- */
+  @media (max-width: 991px) {
+    h2 { font-size: 26px; }
+    .mobile-toggle { display: block; }
+    .header-inner { flex-wrap: wrap; gap: 12px; }
+    .main-nav { display: none; order: 3; width: 100%; border-top: 1px solid var(--borde); }
+    .main-nav.abierto { display: block; }
+    .main-nav > ul { display: block; padding: 8px 0; }
+    .main-nav .sub-menu { position: static; display: block; border: none; box-shadow: none; padding: 0 0 8px 14px; }
+    .header-actions { order: 2; margin-left: 0; width: 100%; justify-content: center; flex-wrap: wrap; }
+    .acceso-menu .panel { right: auto; left: 0; }
+    .oferta, .soluciones, .certificados { grid-template-columns: 1fr; }
+    .oferta p { font-size: 22px; line-height: 30px; }
+    .logos { grid-template-columns: repeat(2, 1fr); }
+    .hero .slides { aspect-ratio: 1.71; }
+  }
+  @media (max-width: 620px) {
+    .btn-sesion, .btn-dashboard { font-size: 13pt; padding: 10px 22px; }
+    .brand img { height: 42px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="{% url 'tracking:home' %}">
+      <img src="{% static 'tracking/site/logo.png' %}" alt="Rastrelital S.A.S">
+    </a>
+
+    <button class="mobile-toggle" type="button" aria-label="Menú" aria-expanded="false">&#9776;</button>
+
+    <nav class="main-nav" id="menu-principal">
+      <ul>
+        <li><a href="#inicio" class="current">Inicio</a></li>
+        <li class="has-sub">
+          <a href="#soluciones">Soluciones</a>
+          <ul class="sub-menu">
+            <li><a href="https://www.rastrelital.com/control-de-combustible/">Control de Combustible</a></li>
+            <li><a href="https://www.rastrelital.com/calificacion-de-manejo/">Calificación de manejo</a></li>
+            <li><a href="https://www.rastrelital.com/control-temperatura/">Control temperatura</a></li>
+            <li><a href="https://www.rastrelital.com/planeacion-de-rutas/">Planeación de rutas</a></li>
+            <li><a href="https://www.rastrelital.com/camaras-de-video/">Cámaras de vídeo</a></li>
+            <li><a href="https://www.rastrelital.com/logistica-de-envios/">Logística de envíos</a></li>
+            <li><a href="https://www.rastrelital.com/mantenimiento-de-flotas/">Mantenimiento de flotas</a></li>
+            <li><a href="https://www.rastrelital.com/sistema-de-rastreo-satelital-gps/">Sistema de rastreo satelital GPS</a></li>
+            <li><a href="https://www.rastrelital.com/otras-soluciones/">Otras soluciones</a></li>
+          </ul>
+        </li>
+        <li><a href="https://www.rastrelital.com/blog/">Blog</a></li>
+        <li><a href="#contacto">Contacto</a></li>
+      </ul>
+    </nav>
+
+    <div class="header-actions">
+      {# Botón azul del sitio original: despliega las plataformas externas. #}
+      <div class="acceso-menu">
+        <button class="btn-sesion" type="button" aria-haspopup="true" aria-expanded="false">Inicio de Sesión</button>
+        <div class="panel">
+          <span class="grupo">Plataforma de Rastreo</span>
+          <a href="https://mapas.rastrelital.com/login" target="_blank" rel="noopener">Rastreo RTL1</a>
+          <a href="https://bu04.utraxweb.com/rastreo/default/" target="_blank" rel="noopener">Rastreo RTL2</a>
+          <hr>
+          <span class="grupo">Plataforma Combustible</span>
+          <a href="https://combustible.utraxweb.com/" target="_blank" rel="noopener">Plataforma Combustible Individual</a>
+          <a href="https://bu04.utraxweb.com/combustible/colectivo/default/" target="_blank" rel="noopener">Plataforma Combustible Colectivos</a>
+          <a href="https://hub.logicamobile.com/" target="_blank" rel="noopener">Plataforma Combustible 2</a>
+        </div>
+      </div>
+
+      {# El añadido: entra al dashboard de ocupación de este proyecto. #}
+      <a class="btn-dashboard" href="{% url 'tracking:dashboard' %}">
+        <svg width="19" height="19" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <rect x="2" y="10" width="4" height="8" rx="1" fill="currentColor"/>
+          <rect x="8" y="6"  width="4" height="12" rx="1" fill="currentColor"/>
+          <rect x="14" y="2" width="4" height="16" rx="1" fill="currentColor"/>
+        </svg>
+        DASHBOARD
+      </a>
+    </div>
+  </div>
+</header>
+
+{# --- Carrusel de portada ------------------------------------------------ #}
+<section class="hero" id="inicio">
+  <div class="slides">
+    <div class="slide activa"><img src="{% static 'tracking/site/banner-1.jpg' %}" alt="Rastrelital — rastreo satelital GPS" fetchpriority="high"></div>
+    <div class="slide"><img src="{% static 'tracking/site/banner-combustible.jpg' %}" alt="Control de combustible" loading="lazy"></div>
+    <div class="slide"><img src="{% static 'tracking/site/banner-3.jpg' %}" alt="Soluciones para tu flota" loading="lazy"></div>
+    <button class="flecha prev" type="button" aria-label="Anterior">&#8249;</button>
+    <button class="flecha next" type="button" aria-label="Siguiente">&#8250;</button>
+    <div class="puntos" role="tablist"></div>
+  </div>
+</section>
+
+{# --- Oferta de servicios ------------------------------------------------- #}
+<section class="banda-azul">
+  <div class="container">
+    <h2>Nuestra Oferta de Servicios</h2>
+    <div class="oferta">
+      <img src="{% static 'tracking/site/oferta-servicios.png' %}" alt="" loading="lazy">
+      <p>Brindamos soluciones tecnológicas para facilitar el seguimiento, monitoreo y control
+         de vehículos, personas y mercancías, con el fin de generar a nuestros clientes
+         tranquilidad, seguridad y ahorros de tiempo y dinero.</p>
+    </div>
+  </div>
+</section>
+
+{# --- Soluciones ---------------------------------------------------------- #}
+<section class="seccion" id="soluciones">
+  <div class="container">
+    <h2>Nuestras Soluciones</h2>
+    <div class="soluciones">
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/controlcombustible.png' %}" alt="" loading="lazy">
+        <h3>Control de Combustible</h3>
+        <p>Administra y gestiona en tiempo real el consumo de combustible de tu flota de vehículos.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/control-de-combustible/">Ver más</a></p>
+      </article>
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/manejo.png' %}" alt="" loading="lazy">
+        <h3>Calificación de Manejo</h3>
+        <p>Mejore la seguridad y eficiencia de su flota, conociendo y evaluando la forma de
+           conducir y el comportamiento de sus conductores en la ruta.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/calificacion-de-manejo/">Ver más</a></p>
+      </article>
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/controltemperatura.png' %}" alt="" loading="lazy">
+        <h3>Control de Temperatura</h3>
+        <p>Monitorea la temperatura y humedad de la carga en tiempo real, recibiendo alertas
+           automáticas en caso de cambios bruscos de temperatura que puedan afectar la calidad
+           de la mercancía.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/control-temperatura/">Ver más</a></p>
+      </article>
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/ruta.png' %}" alt="" loading="lazy">
+        <h3>Planeación de rutas</h3>
+        <p>Optimice las rutas de sus vehículos para reducir tiempos de entrega y costos.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/planeacion-de-rutas/">Ver más</a></p>
+      </article>
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/camara.png' %}" alt="" loading="lazy">
+        <h3>Cámaras de Vídeo</h3>
+        <p>Obtenga una visión más panorámica de la operación de sus vehículos y evite toda
+           distracción al volante.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/camaras-de-video/">Ver más</a></p>
+      </article>
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/envio.png' %}" alt="" loading="lazy">
+        <h3>Logística de envíos</h3>
+        <p>Optimice sus procesos y costos logísticos a través de la gestión de pedidos,
+           inventarios y el despacho de sus mercancías.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/logistica-de-envios/">Ver más</a></p>
+      </article>
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/flotas.png' %}" alt="" loading="lazy">
+        <h3>Administración y Mantenimiento de Flotas</h3>
+        <p>Mantenga su flota en óptimas condiciones, gestionando sus mantenimientos preventivos
+           y correctivos y su documentación al día.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/mantenimiento-de-flotas/">Ver más</a></p>
+      </article>
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/gps.png' %}" alt="" loading="lazy">
+        <h3>Rastreo satelital &#8211; GPS</h3>
+        <p>Conozca la ubicación de sus vehículos y activos móviles en tiempo real.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/sistema-de-rastreo-satelital-gps/">Ver más</a></p>
+      </article>
+
+      <article class="solucion">
+        <img src="{% static 'tracking/site/otras.png' %}" alt="" loading="lazy">
+        <h3>Otras Soluciones</h3>
+        <p>Ofrecemos soluciones personalizadas para satisfacer sus necesidades específicas.</p>
+        <p class="pie"><a class="ver" href="https://www.rastrelital.com/otras-soluciones/">Ver más</a></p>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+{# --- Clientes ------------------------------------------------------------ #}
+<section class="banda-azul">
+  <div class="container">
+    <h2>Nuestros Clientes</h2>
+    <div class="logos">
+      <img src="{% static 'tracking/site/Transmulticarga.png' %}" alt="Transmulticarga" loading="lazy">
+      <img src="{% static 'tracking/site/cliente-fdg.jpg' %}" alt="" loading="lazy">
+      <img src="{% static 'tracking/site/Transportes-Montejo.png' %}" alt="Transportes Montejo" loading="lazy">
+      <img src="{% static 'tracking/site/OPL-Carga.png' %}" alt="OPL Carga" loading="lazy">
+      <img src="{% static 'tracking/site/Enviexpress.png' %}" alt="Enviexpress S.A.S." loading="lazy">
+      <img src="{% static 'tracking/site/expreso.png' %}" alt="Expreso Brasilia" loading="lazy">
+      <img src="{% static 'tracking/site/Gruas-G-M-y-M.png' %}" alt="Grúas G M y M" loading="lazy">
+      <img src="{% static 'tracking/site/Boom.png' %}" alt="" loading="lazy">
+    </div>
+  </div>
+</section>
+
+{# --- Certificaciones ----------------------------------------------------- #}
+<section class="seccion">
+  <div class="container">
+    <h2>Estamos certificados</h2>
+    <div class="certificados">
+      <img src="{% static 'tracking/site/logo1.png' %}" alt="" loading="lazy">
+      <img src="{% static 'tracking/site/logo2.png' %}" alt="" loading="lazy">
+      <img src="{% static 'tracking/site/logo3.png' %}" alt="" loading="lazy">
+    </div>
+  </div>
+</section>
+
+{# --- Preguntas frecuentes ------------------------------------------------ #}
+<section class="banda-azul">
+  <div class="container">
+    <h2>Preguntas Frecuentes</h2>
+    <div class="faq">
+
+      <details>
+        <summary>¿Qué servicios ofrece Rastrelital para la gestión de flotas de vehículos?</summary>
+        <div class="cuerpo">
+          <p>En Rastrelital, brindamos soluciones tecnológicas para facilitar el seguimiento,
+             monitoreo y control de vehículos, personas y mercancías, con el fin de generar a
+             nuestros clientes tranquilidad, seguridad y ahorros de tiempo y dinero.</p>
+          <p>Nuestras soluciones incluyen:</p>
+          <ul>
+            <li><b>Control de Combustible:</b> Gestione en tiempo real el consumo de combustible de su flota de vehículos.</li>
+            <li><b>Calificación de Manejo:</b> Mejore la seguridad y eficiencia de su flota, conociendo y evaluando la forma de conducir y el comportamiento de sus conductores en la ruta.</li>
+            <li><b>Control de Temperatura:</b> Monitorea la temperatura de la carga en tiempo real.</li>
+            <li><b>Planeación de Rutas:</b> Optimice las rutas de sus vehículos para reducir tiempos de entrega y costos.</li>
+            <li><b>Cámaras de Video:</b> Obtenga una visión más panorámica de la operación de sus vehículos.</li>
+            <li><b>Detección de Fatiga del Conductor:</b> Evita toda distracción al volante.</li>
+            <li><b>Logística de Envíos:</b> Simplifique y optimice la gestión de envíos.</li>
+            <li><b>Administración y Mantenimiento de Flotas:</b> Mantenga su flota en óptimas condiciones, gestionando sus mantenimientos preventivos y correctivos y su documentación al día.</li>
+            <li><b>Rastreo Satelital GPS:</b> Conozca la ubicación de sus vehículos y activos móviles en tiempo real.</li>
+            <li><b>Otras Soluciones:</b> Ofrecemos soluciones personalizadas para satisfacer sus necesidades específicas.</li>
+          </ul>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Cómo pueden sus soluciones ayudar a reducir los costos operativos de mi empresa?</summary>
+        <div class="cuerpo">
+          <p>Nuestras soluciones están diseñadas para ayudar a reducir los costos operativos de
+             su empresa al mejorar la eficiencia en la gestión de su flota de vehículos
+             utilizados para movilizar carga o pasajeros.</p>
+          <p>Con nuestras soluciones puede tener en tiempo real el seguimiento de todo el proceso
+             logístico y operativo de sus vehículos desde nuestra plataforma IOT, integrando
+             soluciones que van desde el rastreo satelital de sus activos y la planificación y
+             optimización de rutas más eficientes hasta la administración del consumo de
+             combustible y el mantenimiento adecuado de sus vehículos en el momento indicado.</p>
+          <p>Lo que se traduce en una reducción de sus costos operativos y una mejor rentabilidad
+             para su empresa.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Cómo puedo saber cuál de estas soluciones es la adecuada para mi empresa?</summary>
+        <div class="cuerpo">
+          <p>Con nuestra asesoría vas a tener un acompañamiento técnico y comercial personalizado
+             que tendrá en cuenta todas tus necesidades logísticas y operativas actuales, para
+             identificar los equipos y las soluciones adecuadas que te garanticen tranquilidad,
+             seguridad y ahorros de tiempo y dinero en la operación.</p>
+          <p>Puedes <a href="https://api.whatsapp.com/send/?phone=%2B573054232116&amp;text&amp;type=phone_number&amp;app_absent=0" target="_blank" rel="noopener">agendar una cita</a>
+             con nosotros para programar una asesoría donde evaluaremos tus necesidades
+             específicas y recomendaremos las soluciones que mejor se adapten a tu empresa.</p>
+          <p>Contáctanos ahora a través de nuestro WhatsApp para agendar una asesoría personalizada:</p>
+          <p class="cta-wa">
+            <a href="https://api.whatsapp.com/send/?phone=%2B573054232116&amp;text&amp;type=phone_number&amp;app_absent=0" target="_blank" rel="noopener">
+              <img src="{% static 'tracking/site/cta-whatsapp.png' %}" alt="Escríbenos por WhatsApp" width="300" height="65" loading="lazy">
+            </a>
+          </p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Qué beneficios puedo esperar al utilizar las soluciones de Rastrelital?</summary>
+        <div class="cuerpo">
+          <p>Los beneficios de nuestras soluciones incluyen una mayor eficiencia operativa,
+             reducción de costos operativos, mejorar la seguridad de su flota y facilitar la
+             capacidad de tomar decisiones más informadas basadas en datos generados en tiempo real.</p>
+          <p>También te ofrecemos un excelente soporte técnico para garantizar que aproveches al
+             máximo nuestras soluciones.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Qué ventaja ofrece el rastreo satelital GPS de Rastrelital?</summary>
+        <div class="cuerpo">
+          <p>Nuestro sistema de rastreo satelital GPS le permite realizar un seguimiento en tiempo
+             real de la ubicación de sus vehículos, lo que mejora su seguridad, permite una
+             respuesta más rápida a eventos inesperados y facilita la optimización de sus rutas y
+             la programación de entregas.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Cómo funciona y qué tan confiable es la señal del equipo GPS?</summary>
+        <div class="cuerpo">
+          <p>Los equipos GPS se pueden comunicar por medio de dos sistemas:</p>
+          <p>El sistema convencional, señal GPRS (Simcard), que depende de las coberturas
+             ofrecidas por las empresas de telefonía móvil celular en el territorio colombiano. Y
+             el otro sistema funciona por GPS vía satelital.</p>
+          <p>Nuestros equipos se comunican por ambos sistemas y sólo pierden cobertura en lugares
+             donde los operadores no tienen señal, sin embargo, el sistema GPS guarda el historial
+             de los eventos generados durante el trayecto sin señal y lo transmiten a la
+             plataforma en el momento que se reestablece la cobertura de señal.</p>
+          <p>Y para mejorar nuestra cobertura de señal utilizamos el sistema Multicarrier que
+             tiene los tres operadores (Claro/Movistar y Tigo) habilitados en Colombia.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Qué tipos de Dispositivos GPS existen en el mercado?</summary>
+        <div class="cuerpo">
+          <ul>
+            <li>Dispositivos GPS con conexión 2G, 3G y 4G</li>
+            <li>Dispositivos GPS de comunicación vía satélite</li>
+            <li>Dispositivos GPS en Smartphones</li>
+            <li>Dispositivos GPS Bluetooth</li>
+          </ul>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Qué diferencia existe entre los sensores de control de combustible utilizados por Rastrelital y los de la competencia?</summary>
+        <div class="cuerpo">
+          <p>En el mercado existen varios tipos de sensores utilizados para realizar el monitoreo
+             del combustible, entre ellos están el sistema ultrasónico, el sistema capacitivo y el
+             sistema resistivo. Pero en estos sistemas se presentan unas variaciones de señales
+             acústicas que transmiten eventos de niveles de combustible que no garantizan
+             precisión y exactitud en la medición del combustible almacenado en el tanque.</p>
+          <p>Por el contrario, nuestro sensor de combustible AlertFuel Plus&reg; tiene la
+             tecnología más avanzada en telemetría 100% digital, garantizando una efectividad del
+             98% en la precisión y exactitud de la medición del combustible.</p>
+          <p>Puedes obtener información detallada sobre costos y cómo es el proceso de
+             implementación <a href="https://api.whatsapp.com/send/?phone=%2B573054232116&amp;text&amp;type=phone_number&amp;app_absent=0" target="_blank" rel="noopener">agendando una cita</a>
+             con uno de nuestros asesores a través de nuestro WhatsApp:</p>
+          <p class="cta-wa">
+            <a href="https://api.whatsapp.com/send/?phone=%2B573054232116&amp;text&amp;type=phone_number&amp;app_absent=0" target="_blank" rel="noopener">
+              <img src="{% static 'tracking/site/cta-whatsapp.png' %}" alt="Escríbenos por WhatsApp" width="300" height="65" loading="lazy">
+            </a>
+          </p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Las soluciones de Rastrelital son personalizables para las necesidades específicas de mi empresa?</summary>
+        <div class="cuerpo">
+          <p>Sí, nuestras soluciones son altamente personalizables.</p>
+          <p>Trabajaremos contigo para adaptar nuestras soluciones a las necesidades únicas de tu
+             empresa y tu industria.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Cómo se integran las soluciones de Rastrelital en la operación existente de mi empresa?</summary>
+        <div class="cuerpo">
+          <p>La integración de nuestras soluciones es sencilla y nuestro equipo técnico te guiará
+             a lo largo del proceso. Las soluciones se pueden integrar con sistemas existentes
+             para garantizar una transición sin problemas.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Cómo puedo obtener más información sobre los costos y la implementación de las soluciones de Rastrelital?</summary>
+        <div class="cuerpo">
+          <p>Puedes obtener información detallada sobre costos y cómo es el proceso de
+             implementación agendando una cita con uno de nuestros asesores a través de nuestro
+             WhatsApp:</p>
+          <p class="cta-wa">
+            <a href="https://api.whatsapp.com/send/?phone=%2B573054232116&amp;text&amp;type=phone_number&amp;app_absent=0" target="_blank" rel="noopener">
+              <img src="{% static 'tracking/site/cta-whatsapp.png' %}" alt="Escríbenos por WhatsApp" width="300" height="65" loading="lazy">
+            </a>
+          </p>
+          <p>Estaremos encantados de proporcionarte una asesoría personalizada.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Qué tipo de empresas pueden beneficiarse de las soluciones de Rastrelital?</summary>
+        <div class="cuerpo">
+          <p>Nuestras soluciones son ideales para empresas de transporte o manufactura que
+             necesitan gestionar flotas de vehículos que movilizan carga o pasajeros. También para
+             vehículos particulares, motocicleta, maquinaria amarilla, rastreo de personas y
+             mercancías.</p>
+          <p>También son efectivas para empresas que tienen hasta un solo vehículo y desean
+             mejorar la eficiencia de su operación.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Rastrelital ofrece soporte técnico y entrenamiento?</summary>
+        <div class="cuerpo">
+          <p>Sí, ofrecemos soporte técnico integral y capacitación para garantizar que tu equipo
+             de trabajo pueda aprovechar al máximo nuestras soluciones. Estamos aquí para ayudarte
+             en cada paso del camino.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>¿Cómo puedo ponerme en contacto con el equipo de Rastrelital para obtener más información?</summary>
+        <div class="cuerpo">
+          <p>Estamos disponibles para responder a todas tus preguntas y asesorarte en tu búsqueda
+             de soluciones tecnológicas que te permitan mejorar la gestión de tu flota de vehículos.</p>
+          <p>Puedes contactarnos a través de nuestro WhatsApp para agendar una asesoría personalizada:</p>
+          <p class="cta-wa">
+            <a href="https://api.whatsapp.com/send?phone=573054232116&amp;text=Hola%2C%20quiero%20conocer%20m%C3%A1s%20informaci%C3%B3n%20sobre%20el%20portafolio%20de%20servicios%20y%20soluciones%20de%20Rastrelital." target="_blank" rel="noopener">
+              <img src="{% static 'tracking/site/cta-whatsapp.png' %}" alt="Escríbenos por WhatsApp" width="300" height="65" loading="lazy">
+            </a>
+          </p>
+          <p>Y también nos puedes escribir todas tus dudas e inquietudes a nuestro correo:</p>
+          <p class="cta-wa"><a class="ver2" href="mailto:gerencia@rastrelital.com">gerencia@rastrelital.com</a></p>
+        </div>
+      </details>
+
+    </div>
+  </div>
+</section>
+
+{# --- Contacto ------------------------------------------------------------ #}
+<section class="contacto" id="contacto">
+  <div class="container">
+    <div class="bloque">
+      <h2>Para conocer más información sobre los beneficios y características de nuestros
+          servicios agenda una cita por WhatsApp</h2>
+      <p>
+        <a href="https://api.whatsapp.com/send/?phone=%2B573054232116&amp;text&amp;type=phone_number&amp;app_absent=0" target="_blank" rel="noopener">
+          <img src="{% static 'tracking/site/cta-whatsapp.png' %}" alt="Escríbenos por WhatsApp" width="300" height="65" loading="lazy">
+        </a>
+      </p>
+    </div>
+
+    <div class="bloque">
+      <h2>También nos puedes contactar en este correo:</h2>
+      <p><a class="ver2" href="mailto:comercial@rastrelital.com">comercial@rastrelital.com</a></p>
+    </div>
+
+    <div class="bloque">
+      <h2>Y en nuestras redes sociales:</h2>
+      <p class="redes">
+        <a href="https://www.facebook.com/profile.php?id=100086107505399&amp;mibextid=2JQ9oc" target="_blank" rel="noopener">
+          <img src="{% static 'tracking/site/facebook.png' %}" alt="Facebook" loading="lazy"></a>
+        <a href="https://twitter.com/rastrelital" target="_blank" rel="noopener">
+          <img src="{% static 'tracking/site/twitter.png' %}" alt="Twitter" loading="lazy"></a>
+        <a href="https://www.instagram.com/rastrelital/" target="_blank" rel="noopener">
+          <img src="{% static 'tracking/site/instagram.png' %}" alt="Instagram" loading="lazy"></a>
+      </p>
+    </div>
+
+    <p class="gracias">¡Gracias por su tiempo!</p>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="container">
+    Rastrelital - Soluciones inteligentes &copy; 2023. Diseñado por: Comercial Web
+  </div>
+</footer>
+
+<script>
+  // --- Menú de móvil ------------------------------------------------------
+  (function () {
+    var boton = document.querySelector('.mobile-toggle');
+    var menu = document.getElementById('menu-principal');
+    boton.addEventListener('click', function () {
+      var abierto = menu.classList.toggle('abierto');
+      boton.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+    });
+  })();
+
+  // --- Menú de «Inicio de Sesión» ----------------------------------------
+  // En escritorio lo abre el :hover del CSS; el clic es para pantallas
+  // táctiles, donde no hay hover que valga.
+  (function () {
+    var caja = document.querySelector('.acceso-menu');
+    var boton = caja.querySelector('.btn-sesion');
+    var panel = caja.querySelector('.panel');
+    boton.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var abierto = panel.classList.toggle('abierto');
+      boton.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+    });
+    document.addEventListener('click', function (ev) {
+      if (!caja.contains(ev.target)) {
+        panel.classList.remove('abierto');
+        boton.setAttribute('aria-expanded', 'false');
+      }
+    });
+  })();
+
+  // --- Carrusel de portada -------------------------------------------------
+  // Reemplaza al Revolution Slider del sitio original: fundido cada 9 s (el
+  // mismo intervalo), con flechas y puntos. Se detiene mientras el puntero
+  // está encima y cuando la pestaña no se ve, para no gastar batería.
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.hero .slide'));
+    if (slides.length < 2) { return; }
+
+    var hero = document.querySelector('.hero');
+    var puntos = document.querySelector('.hero .puntos');
+    var actual = 0;
+    var reloj = null;
+    var ESPERA = 9000;
+
+    slides.forEach(function (_, i) {
+      var p = document.createElement('button');
+      p.type = 'button';
+      p.setAttribute('aria-label', 'Imagen ' + (i + 1));
+      if (i === 0) { p.className = 'activa'; }
+      p.addEventListener('click', function () { mostrar(i); reiniciar(); });
+      puntos.appendChild(p);
+    });
+
+    function mostrar(i) {
+      actual = (i + slides.length) % slides.length;
+      slides.forEach(function (s, n) { s.classList.toggle('activa', n === actual); });
+      Array.prototype.forEach.call(puntos.children, function (p, n) {
+        p.classList.toggle('activa', n === actual);
+      });
+    }
+    function reiniciar() {
+      clearInterval(reloj);
+      reloj = setInterval(function () { mostrar(actual + 1); }, ESPERA);
+    }
+
+    hero.querySelector('.prev').addEventListener('click', function () { mostrar(actual - 1); reiniciar(); });
+    hero.querySelector('.next').addEventListener('click', function () { mostrar(actual + 1); reiniciar(); });
+    hero.addEventListener('mouseenter', function () { clearInterval(reloj); });
+    hero.addEventListener('mouseleave', reiniciar);
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { clearInterval(reloj); } else { reiniciar(); }
+    });
+
+    reiniciar();
+  })();
+</script>
+</body>
+</html>

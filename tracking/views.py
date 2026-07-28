@@ -1,8 +1,9 @@
 """Vistas HTTP de la app tracking.
 
-Expone las páginas del dashboard (ocupación por rango de fechas y mapa
-de flota en vivo) y sus respectivos endpoints JSON, que delegan toda
-la lógica de negocio en :mod:`tracking.services`.
+Expone la portada pública del sitio, las páginas del dashboard
+(ocupación por rango de fechas y mapa de flota en vivo) y sus
+respectivos endpoints JSON, que delegan toda la lógica de negocio en
+:mod:`tracking.services`.
 """
 
 import logging
@@ -107,6 +108,23 @@ def _empresas_permitidas(request):
     """
     cuenta = cuenta_actual(request) or {}
     return services.tabs_permitidas(cuenta.get('empresas'))
+
+
+def home(request):
+    """Renderiza la portada pública del sitio (copia de rastrelital.com).
+
+    Es la cara comercial del dominio y la única página que se ve sin
+    sesión además del formulario de acceso (ver
+    :class:`tracking.middleware.LoginRequeridoMiddleware`). No consulta
+    el API ni depende de la sesión: es contenido fijo.
+
+    Args:
+        request: El HttpRequest entrante.
+
+    Returns:
+        HttpResponse con la plantilla ``tracking/home.html``.
+    """
+    return render(request, 'tracking/home.html')
 
 
 def login_view(request):

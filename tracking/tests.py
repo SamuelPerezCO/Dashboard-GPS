@@ -438,6 +438,15 @@ class LoginTests(TestCase):
             self.assertRedirects(r, f'{self.login_url}?next={url}',
                                  fetch_redirect_response=False)
 
+    def test_la_portada_se_ve_sin_sesion(self):
+        """La portada es la cara pública del sitio: no debe pedir nada."""
+        r = self.client.get(reverse('tracking:home'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Nuestras Soluciones')
+        # Y lleva al dashboard, que es lo único que este proyecto le agrega.
+        self.assertContains(r, f'href="{reverse("tracking:dashboard")}"')
+        self.assertContains(r, 'DASHBOARD')
+
     def test_el_login_se_ve_sin_sesion(self):
         r = self.client.get(self.login_url)
         self.assertEqual(r.status_code, 200)
