@@ -1,3 +1,5 @@
+"""Configuración de la app tracking."""
+
 from django.apps import AppConfig
 
 

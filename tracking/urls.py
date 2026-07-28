@@ -1,3 +1,8 @@
+"""Rutas del sitio.
+
+La raíz es la portada pública; el dashboard vive en /dashboard/.
+"""
+
 from django.urls import path
 
 from . import views

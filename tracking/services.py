@@ -1,3 +1,9 @@
+"""Lógica del dashboard: servicios, timbradas y ocupación por bus.
+
+Un servicio es una entrada a geocerca y una timbrada es un pasajero que
+sube; la ocupación cruza las dos contra la capacidad del bus.
+"""
+
 import html
 import logging
 import re
@@ -13,6 +19,11 @@ HILOS_CONSULTA = 8
 
 
 def _en_paralelo(funcion, elementos):
+    """Aplica `funcion` a cada elemento con varios hilos, respetando el orden.
+
+    El orden importa: quien llama empareja el resultado con la lista que
+    mandó.
+    """
     elementos = list(elementos)
     if not elementos:
         return []
@@ -21,10 +32,12 @@ def _en_paralelo(funcion, elementos):
 
 
 def _hoy():
+    """La fecha de hoy en YYYY-MM-DD, que es como habla el API."""
     return datetime.now().strftime('%Y-%m-%d')
 
 
 def _norm_interno(interno):
+    """Deja un interno comparable: 'int  7074' -> 'INT7074'."""
     return ''.join((interno or '').upper().split())
 
 
@@ -62,12 +75,26 @@ _RE_NOMBRE_GEOCERCA = re.compile(r'GEOCERCA\s+(.+?)\s+el\s+\d{4}/', re.IGNORECAS
 
 
 def _nombre_geocerca(alerta):
+    """Saca el nombre de la geocerca del texto de la alerta.
+
+    Returns:
+        El nombre, o cadena vacía si la descripción no trae el patrón.
+    """
     desc = html.unescape(alerta.get('Descripcion') or '')
     m = _RE_NOMBRE_GEOCERCA.search(desc)
     return m.group(1).strip() if m else ''
 
 
 def empresa_de_geocerca(nombre):
+    """Deduce la empresa por el nombre de la geocerca.
+
+    Es la única señal que hay: el API no tiene campo de cliente. PROCAPS
+    solo se reconoce al principio del nombre (o como «RUTA n»); DITAR y
+    RELIANZ, en cualquier parte.
+
+    Returns:
+        La empresa, o None si el nombre no se parece a ninguna.
+    """
     nombre = (nombre or '').strip()
     for empresa, patron in _PATRON_EMPRESA:
         if patron.search(nombre):
@@ -76,10 +103,21 @@ def empresa_de_geocerca(nombre):
 
 
 def tab_de_empresa(empresa):
+    """Pestaña de una empresa; lo que no reconocemos cae en «Sin identificar»."""
     return empresa if empresa in EMPRESAS else TAB_SIN_IDENTIFICAR
 
 
 def tabs_permitidas(empresas):
+    """Pestañas que puede ver un usuario.
+
+    Args:
+        empresas: Empresas del usuario, o None si las ve todas.
+
+    Returns:
+        Las empresas permitidas, siempre con «Sin identificar» al final:
+        ahí cae casi toda la actividad de DITAR y RELIANZ, y sin esa
+        pestaña esos usuarios verían el dashboard vacío.
+    """
     if empresas is None:
         return list(EMPRESAS)
     elegidas = {str(e).strip().upper() for e in empresas}
@@ -88,6 +126,12 @@ def tabs_permitidas(empresas):
 
 
 def _filtro_de_tabs(empresa, permitidas):
+    """Pestañas que se van a contar.
+
+    Returns:
+        La pestaña pedida si hay una, el techo del usuario si no, o None
+        cuando no hay nada que filtrar.
+    """
     if empresa:
         return {empresa}
     if permitidas is None:
@@ -96,6 +140,12 @@ def _filtro_de_tabs(empresa, permitidas):
 
 
 def fleet_summary():
+    """Estado en vivo de toda la flota, para el mapa.
+
+    Returns:
+        Las unidades ordenadas por actividad —las que hoy no reportan van
+        al final— y el conteo de encendidas, en movimiento y reportando.
+    """
     vehicles = {v.get('idgps'): v for v in api_client.get_vehicles()}
     units = api_client.get_live_data()
     hoy = _hoy()
@@ -146,6 +196,11 @@ def fleet_summary():
 
 
 def _es_entrada_geocerca(alerta):
+    """Dice si la alerta es una entrada a geocerca.
+
+    Las salidas se descartan: el viaje se cuenta cuando el bus entra, y
+    contar también la salida lo duplicaría.
+    """
     tipo = (alerta.get('TipoAlerta') or '').upper()
     status = (alerta.get('StatusAlerta') or '').upper()
     desc = (alerta.get('Descripcion') or '').upper()
@@ -155,6 +210,14 @@ def _es_entrada_geocerca(alerta):
 
 
 def _servicios_del_dia(fecha, es_hoy):
+    """Servicios de un día, ordenados por hora y sin repetidos.
+
+    El API manda la misma alerta varias veces, así que se descarta la que
+    coincide en equipo, fecha, hora y descripción.
+
+    Args:
+        es_hoy: Acorta el cache a dos minutos, porque el día todavía crece.
+    """
     ttl = 120 if es_hoy else 24 * 3600
     servicios = []
     vistos = set()
@@ -177,6 +240,11 @@ def _servicios_del_dia(fecha, es_hoy):
 
 
 def _empresa_de_timbrada(hora, servicios_del_bus):
+    """Empresa a la que se le apunta una timbrada.
+
+    La timbrada no dice de quién es, así que se le atribuye la del siguiente
+    servicio de ese bus ese día, o la del último si ya no quedan.
+    """
     for h, empresa in servicios_del_bus:
         if h >= hora:
             return empresa
@@ -185,6 +253,16 @@ def _empresa_de_timbrada(hora, servicios_del_bus):
 
 def _timbradas_de_vehiculo(equipo, desde, hasta_efectivo, hoy,
                            primer_dia_mes, dentro_del_mes):
+    """Timbradas de un bus en el rango, con el cache que más convenga.
+
+    Si el rango cabe en el mes en curso se pide el mes entero y se recorta
+    en memoria: así todos los rangos del mes comparten una sola consulta.
+
+    Returns:
+        Una tupla (timbradas, falló). Si el API falla devuelve lista vacía
+        y el aviso, para que el dashboard pueda decir cuántas unidades se
+        quedaron sin datos en vez de mostrar un cero limpio.
+    """
     if not equipo or hasta_efectivo < desde:
         return [], False
     try:
@@ -201,12 +279,27 @@ def _timbradas_de_vehiculo(equipo, desde, hasta_efectivo, hoy,
 
 
 def _lista_dias(desde, hasta):
+    """Todos los días del rango, con los dos extremos incluidos."""
     d1 = datetime.strptime(desde, '%Y-%m-%d').date()
     d2 = datetime.strptime(hasta, '%Y-%m-%d').date()
     return [(d1 + timedelta(days=n)).isoformat() for n in range((d2 - d1).days + 1)]
 
 
 def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
+    """Ocupación del rango: por bus, por día y de la flota entera.
+
+    La ocupación de un bus es timbradas / (servicios × capacidad): pasajeros
+    promedio por viaje sobre los asientos que tiene. Los buses sin capacidad
+    conocida o sin servicios quedan fuera del promedio en vez de entrar como
+    cero y ensuciarlo.
+
+    Args:
+        desde, hasta: Rango en YYYY-MM-DD. Si vienen vacíos se consulta hoy,
+            y si vienen al revés se voltean.
+        empresa: Pestaña que se está viendo, o None para el total.
+        permitidas: Techo del usuario. Aunque no pida una empresa, nunca se
+            le suman viajes de una que no puede ver.
+    """
     hoy = _hoy()
     desde = desde or hoy
     hasta = hasta or hoy
@@ -310,6 +403,7 @@ DIAS_ULTIMO_MES = 30
 
 
 def rango_ultimo_mes():
+    """El último mes: de hace DIAS_ULTIMO_MES días hasta hoy."""
     hoy = _hoy()
     desde = (datetime.strptime(hoy, '%Y-%m-%d')
              - timedelta(days=DIAS_ULTIMO_MES)).strftime('%Y-%m-%d')
@@ -317,5 +411,10 @@ def rango_ultimo_mes():
 
 
 def precalentar_ultimo_mes():
+    """Consulta el último mes solo para dejarlo cacheado.
+
+    Como las alertas se guardan día por día, le sirve a cualquier rango que
+    caiga dentro, no solo al mes exacto.
+    """
     desde, hasta = rango_ultimo_mes()
     range_summary(desde, hasta)

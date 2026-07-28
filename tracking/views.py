@@ -1,3 +1,5 @@
+"""Vistas del sitio: la portada pública, el login y el dashboard."""
+
 import logging
 import re
 import threading
@@ -27,6 +29,11 @@ PRECALENTAMIENTO_TTL = 600
 
 
 def _precalentar_dashboard():
+    """Precalienta el dashboard sin dejar escapar ningún error.
+
+    Vive en un hilo que nadie espera: si algo falla solo queda en el log y
+    el dashboard consultará normal, sin cache adelantado.
+    """
     try:
         services.precalentar_ultimo_mes()
     except api_client.ApiConfigError as exc:
@@ -36,6 +43,15 @@ def _precalentar_dashboard():
 
 
 def _lanzar_precalentamiento():
+    """Arranca el precalentamiento en segundo plano, si toca.
+
+    `cache.add` es atómico: solo la primera visita al login dentro de la
+    ventana del TTL lanza el hilo, así un bot que escanee la página no
+    dispara una consulta pesada por visita.
+
+    Returns:
+        True si lanzó un hilo nuevo; False si ya había uno reciente.
+    """
     if not cache.add(CLAVE_PRECALENTAMIENTO, True, PRECALENTAMIENTO_TTL):
         return False
     threading.Thread(target=_precalentar_dashboard,
@@ -44,19 +60,35 @@ def _lanzar_precalentamiento():
 
 
 def _clave_intentos(request):
+    """Clave de cache donde se cuentan los intentos fallidos de una IP.
+
+    Detrás de un proxy todas las peticiones comparten IP, así que ahí el
+    freno pasa a ser global en vez de por visitante.
+    """
     return f"login_intentos::{request.META.get('REMOTE_ADDR') or 'desconocida'}"
 
 
 def _empresas_permitidas(request):
+    """Pestañas que puede ver el usuario de la sesión."""
     cuenta = cuenta_actual(request) or {}
     return services.tabs_permitidas(cuenta.get('empresas'))
 
 
 def home(request):
+    """La portada pública. Contenido fijo: no toca el API ni la sesión."""
     return render(request, 'tracking/home.html')
 
 
 def login_view(request):
+    """Formulario de acceso al dashboard.
+
+    Compara contra DASHBOARD_USUARIOS: el usuario no distingue mayúsculas,
+    la contraseña sí. Tras MAX_INTENTOS fallos desde la misma IP el login
+    se bloquea un rato, porque el sitio es público.
+
+    El GET además manda a precalentar el dashboard: mientras la persona
+    escribe su contraseña, el servidor va adelantando consultas al API.
+    """
     destino = request.POST.get('next') or request.GET.get('next') or ''
     if not url_has_allowed_host_and_scheme(
             destino, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
@@ -94,16 +126,28 @@ def login_view(request):
 
 
 def logout_view(request):
+    """Cierra la sesión. Solo por POST, para que nadie la cierre desde fuera."""
     if request.method == 'POST':
         request.session.flush()
     return redirect('tracking:login')
 
 
 def _sesion_nueva(request):
+    """Consume la marca del login y dice si esta es la página de entrada.
+
+    Es de un solo uso: la gasta la primera página que se pinta después de
+    entrar, que es la que sella su pestaña. Una recarga o una pestaña nueva
+    ya la encuentran vacía.
+    """
     return bool(request.session.pop(CLAVE_LOGIN_NUEVO, False))
 
 
 def dashboard(request):
+    """Dashboard de ocupación por rango de fechas.
+
+    Solo dibuja las pestañas del usuario, pero el reparto que manda es el
+    de api_dashboard: la URL del JSON se puede escribir a mano.
+    """
     return render(request, 'tracking/dashboard.html', {
         'empresas': [{'valor': e, 'etiqueta': services.ETIQUETA_EMPRESA[e]}
                      for e in _empresas_permitidas(request)],
@@ -113,6 +157,14 @@ def dashboard(request):
 
 
 def fleet_dashboard(request):
+    """Mapa de la flota en vivo, solo para acceso total.
+
+    El mapa muestra la flota entera, que no está repartida por empresa;
+    al resto se le manda a su dashboard.
+
+    Returns:
+        La página del mapa, o una redirección al dashboard.
+    """
     if not tiene_acceso_total(request):
         return redirect('tracking:dashboard')
     return render(request, 'tracking/fleet.html', {
@@ -122,6 +174,12 @@ def fleet_dashboard(request):
 
 
 def _json_api(build):
+    """Ejecuta `build` y envuelve el resultado, o el error, en un JsonResponse.
+
+    Returns:
+        400 si lo que pidieron no sirve, 503 si faltan credenciales y 502
+        si el problema fue del WebService.
+    """
     try:
         return JsonResponse(build())
     except ValueError as exc:
@@ -140,6 +198,12 @@ def _json_api(build):
 
 
 def api_dashboard(request):
+    """JSON del dashboard para un rango de fechas.
+
+    Aquí es donde se reparte el acceso de verdad: responde 403 a la empresa
+    que el usuario no puede ver, y su total nunca pasa de lo suyo. Ocultar
+    la pestaña en la plantilla no protege nada por sí solo.
+    """
     desde = request.GET.get('desde') or None
     hasta = request.GET.get('hasta') or None
     for f in (desde, hasta):
@@ -161,6 +225,7 @@ def api_dashboard(request):
 
 
 def api_fleet(request):
+    """JSON del mapa de flota. Solo para acceso total, igual que la página."""
     if not tiene_acceso_total(request):
         return JsonResponse(
             {'error': 'Tu usuario no tiene acceso al mapa de flota.'}, status=403)

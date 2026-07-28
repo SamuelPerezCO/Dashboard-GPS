@@ -1,3 +1,5 @@
+"""Pruebas del dashboard. El API va simulado: la suite no toca la red."""
+
 from datetime import date, datetime
 from unittest.mock import patch
 
@@ -11,6 +13,11 @@ from .middleware import CLAVE_SESION, CLAVE_USUARIO
 
 
 def _alerta(equipo, hora, geocerca, fecha='2026-07-20', fuera=False):
+    """Arma una alerta como las que manda el API.
+
+    Args:
+        fuera: La vuelve una salida de geocerca en vez de una entrada.
+    """
     sentido = 'FUERA DE LA' if fuera else 'DENTRO DE'
     return {
         'Equipo': equipo,
@@ -24,6 +31,8 @@ def _alerta(equipo, hora, geocerca, fecha='2026-07-20', fuera=False):
 
 
 class NombreGeocercaTests(TestCase):
+    """Sacar el nombre de la geocerca del texto de la alerta."""
+
     def test_extrae_el_nombre(self):
         self.assertEqual(
             services._nombre_geocerca(_alerta('1', '08:00:00', 'PROCAPS')),
@@ -39,6 +48,8 @@ class NombreGeocercaTests(TestCase):
 
 
 class EmpresaDeGeocercaTests(TestCase):
+    """A qué empresa pertenece cada nombre de geocerca."""
+
     def test_procaps_va_anclado_al_inicio(self):
         self.assertEqual(services.empresa_de_geocerca('PROCAPS'), 'PROCAPS')
         self.assertEqual(services.empresa_de_geocerca('procaps planta'), 'PROCAPS')
@@ -61,6 +72,8 @@ class EmpresaDeGeocercaTests(TestCase):
 
 
 class TabDeEmpresaTests(TestCase):
+    """En qué pestaña cae cada empresa."""
+
     def test_cada_empresa_a_su_pestana(self):
         for e in ('PROCAPS', 'DITAR', 'RELIANZ'):
             self.assertEqual(services.tab_de_empresa(e), e)
@@ -74,6 +87,8 @@ class TabDeEmpresaTests(TestCase):
 
 
 class TabsPermitidasTests(TestCase):
+    """Qué pestañas ve cada usuario."""
+
     def test_sin_restriccion_ve_todo(self):
         self.assertEqual(services.tabs_permitidas(None), list(services.EMPRESAS))
 
@@ -97,6 +112,8 @@ class TabsPermitidasTests(TestCase):
 
 
 class EntradaGeocercaTests(TestCase):
+    """Qué alertas cuentan como servicio y cuáles no."""
+
     def test_entrada_cuenta(self):
         self.assertTrue(services._es_entrada_geocerca(_alerta('1', '08:00:00', 'PROCAPS')))
 
@@ -110,6 +127,8 @@ class EntradaGeocercaTests(TestCase):
 
 
 class EmpresaDeTimbradaTests(TestCase):
+    """A qué empresa se le apunta cada timbrada."""
+
     SERVICIOS = [('08:00:00', 'PROCAPS'), ('14:00:00', 'DITAR')]
 
     def test_toma_el_servicio_siguiente(self):
@@ -127,6 +146,8 @@ class EmpresaDeTimbradaTests(TestCase):
 
 
 class NormalizarInternoTests(TestCase):
+    """Los internos se comparan sin espacios y en mayúsculas."""
+
     def test_normaliza(self):
         self.assertEqual(services._norm_interno('INT 7074'), 'INT7074')
         self.assertEqual(services._norm_interno('  int  7074 '), 'INT7074')
@@ -141,6 +162,8 @@ class NormalizarInternoTests(TestCase):
 @patch.object(services.api_client, 'get_vehicles')
 @patch.object(services.api_client, 'get_passenger_events')
 class RangeSummaryTests(TestCase):
+    """El resumen del rango: conteos, ocupación y filtros por empresa."""
+
     VEHICULOS = [
         {'idgps': '100', 'nombre': 'INT 7076'},
         {'idgps': '200', 'nombre': 'INT 9999'},
@@ -274,6 +297,8 @@ class RangeSummaryTests(TestCase):
 
 
 class SinBaseDeDatosTests(TestCase):
+    """Entrar y ver el dashboard no escribe una sola fila."""
+
     def test_la_sesion_va_en_cookie_firmada(self):
         self.assertEqual(settings.SESSION_ENGINE,
                          'django.contrib.sessions.backends.signed_cookies')
@@ -292,6 +317,8 @@ class SinBaseDeDatosTests(TestCase):
 
 
 class PrecalentamientoTests(TestCase):
+    """El precalentamiento que lanza el login."""
+
     def setUp(self):
         cache.clear()
         self.login_url = reverse('tracking:login')
@@ -344,6 +371,8 @@ class PrecalentamientoTests(TestCase):
 
 
 class LoginTests(TestCase):
+    """Quién entra, quién no y cómo se frena a quien insiste."""
+
     def setUp(self):
         cache.clear()
         self.login_url = reverse('tracking:login')
@@ -422,6 +451,8 @@ class LoginTests(TestCase):
 
 
 class AccesoPorEmpresaTests(TestCase):
+    """Cada usuario ve solo los viajes de su empresa, también en el JSON."""
+
     def setUp(self):
         cache.clear()
         self.login_url = reverse('tracking:login')
@@ -519,6 +550,8 @@ class AccesoPorEmpresaTests(TestCase):
 
 
 class PestanaTests(TestCase):
+    """Cerrar la pestaña obliga a escribir usuario y contraseña otra vez."""
+
     def setUp(self):
         cache.clear()
         self.login_url = reverse('tracking:login')
@@ -574,6 +607,8 @@ class PestanaTests(TestCase):
 
 
 class DashboardTests(TestCase):
+    """La página del dashboard y los errores de su endpoint JSON."""
+
     def setUp(self):
         cache.clear()
         self.client.post(reverse('tracking:login'),

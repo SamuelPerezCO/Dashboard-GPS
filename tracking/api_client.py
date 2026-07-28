@@ -1,3 +1,5 @@
+"""Cliente del WebService de Service24GPS: token, cache y reintentos."""
+
 import hashlib
 import json
 import logging
@@ -15,14 +17,15 @@ DEFAULT_RESPONSE_TTL = 60
 
 
 class ApiConfigError(Exception):
-    pass
+    """Faltan las credenciales del API en el .env."""
 
 
 class ApiError(Exception):
-    pass
+    """El WebService contestó, pero con un error."""
 
 
 def _check_config():
+    """Falla temprano si el .env no trae las tres credenciales."""
     if not (settings.GPS_APIKEY and settings.GPS_USERNAME and settings.GPS_PASSWORD):
         raise ApiConfigError(
             'Faltan credenciales: escribe GPS_APIKEY, GPS_USERNAME y '
@@ -31,6 +34,11 @@ def _check_config():
 
 
 def _post(action, data):
+    """Llama a una acción del WebService y devuelve su campo `data`.
+
+    Raises:
+        ApiError: Si la respuesta trae un status distinto de 200.
+    """
     url = f"{settings.GPS_API_BASE_URL.rstrip('/')}/{action}"
     resp = requests.post(url, data=data, timeout=30)
     resp.raise_for_status()
@@ -41,6 +49,12 @@ def _post(action, data):
 
 
 def get_token(force=False):
+    """Token de sesión del API, tomado del cache mientras siga vivo.
+
+    Args:
+        force: Pide uno nuevo aunque haya guardado. Se usa cuando el
+            WebService rechaza el que teníamos.
+    """
     _check_config()
     if not force:
         token = cache.get(TOKEN_CACHE_KEY)
@@ -58,6 +72,15 @@ def get_token(force=False):
 
 
 def call(action, params=None, cache_ttl=DEFAULT_RESPONSE_TTL):
+    """Llama al API con el token puesto y cachea la respuesta.
+
+    Si el WebService rechaza la llamada reintenta una vez con un token
+    recién pedido: casi siempre es que el anterior venció.
+
+    Args:
+        cache_ttl: Segundos que se guarda la respuesta. Cada endpoint elige
+            el suyo según qué tan rápido cambian sus datos.
+    """
     params = params or {}
     raw_key = f'gps_api::{action}::{json.dumps(params, sort_keys=True)}'
     cache_key = 'gps_api::' + hashlib.md5(raw_key.encode()).hexdigest()
@@ -78,14 +101,17 @@ def call(action, params=None, cache_ttl=DEFAULT_RESPONSE_TTL):
 
 
 def get_vehicles():
+    """La flota completa, tal como la tiene registrada la plataforma."""
     return call('vehicleGetAll', cache_ttl=300)
 
 
 def get_live_data():
+    """Posición y estado en vivo de todas las unidades."""
     return call('getdata', {'UseUTCDate': '0', 'sensores': '1'})
 
 
 def get_alerts(fecha, cache_ttl=120):
+    """Alertas de un día. Devuelve lista aunque el API mande una sola."""
     data = call('getAlerts', {'equipo': '', 'fecha': fecha}, cache_ttl=cache_ttl)
     if isinstance(data, dict):
         data = [data]
@@ -93,6 +119,7 @@ def get_alerts(fecha, cache_ttl=120):
 
 
 def get_onbus_programmed_routes(fecha_inicio, fecha_final):
+    """Rutas programadas de OnBus entre dos fechas."""
     data = call('getProgrammedRoutesOnBus', {
         'fecha_inicio': fecha_inicio,
         'fecha_final': fecha_final,
@@ -107,6 +134,12 @@ _IBUTTON_RE = re.compile(r'"iButton_ID":"([0-9a-fA-F]+)"')
 
 
 def get_passenger_events(equipo, fecha_ini, fecha_fin, cache_ttl=600):
+    """Timbradas de un bus: los eventos 2720, con el iButton de cada pasajero.
+
+    Returns:
+        Lista de {fecha, hora, pasajero}. `pasajero` es None cuando el
+        evento no trae iButton o viene en ceros.
+    """
     data = call('historyGetEvents', {
         'equipo': equipo,
         'fechaIni': f'{fecha_ini} 00:00:00',
@@ -130,6 +163,14 @@ def get_passenger_events(equipo, fecha_ini, fecha_fin, cache_ttl=600):
 
 
 def parse_sensores(sensores):
+    """Aplana el árbol de sensores a una lista de {nombre, valor}.
+
+    Args:
+        sensores: El campo tal como llega, que a veces es JSON en texto.
+
+    Returns:
+        Lista vacía si el JSON viene mal o con una forma que no reconocemos.
+    """
     if isinstance(sensores, str):
         try:
             sensores = json.loads(sensores)
