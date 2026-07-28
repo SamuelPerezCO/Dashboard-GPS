@@ -18,8 +18,6 @@ from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Lee el archivo .env (que está junto a manage.py) y carga sus variables
-# al entorno. Así las credenciales NUNCA quedan escritas en el código.
 load_dotenv(BASE_DIR / '.env')
 
 
@@ -33,64 +31,28 @@ SECRET_KEY = os.getenv(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# Por defecto APAGADO: si en el servidor falta la variable, se cae del lado
-# seguro. Con DEBUG encendido, cualquier error muestra en pantalla el código y
-# las variables del proyecto, incluidas las credenciales del API. En local el
-# .env trae DJANGO_DEBUG=1, así que el desarrollo no cambia.
 DEBUG = os.getenv('DJANGO_DEBUG', '0') == '1'
 
 ALLOWED_HOSTS = [
-    'localhost', '127.0.0.1',   # desarrollo local
-    'dashboardgps.qd.je',       # dominio propio
-    '.onrender.com',            # URL que asigna Render (xxxx.onrender.com)
+    'localhost', '127.0.0.1',
+    'dashboardgps.qd.je',
+    '.onrender.com',
 ]
 
-# Orígenes HTTPS en los que Django acepta formularios POST (login del /admin/).
 CSRF_TRUSTED_ORIGINS = [
     'https://dashboardgps.qd.je',
     'https://*.onrender.com',
 ]
 
-# --- Credenciales del WebService Service24GPS (se llenan en el .env) ---
-# os.getenv lee cada variable del entorno; el segundo argumento es el valor
-# por defecto si no existe. tracking/api_client.py usa estas 4 constantes.
 GPS_API_BASE_URL = os.getenv('GPS_API_BASE_URL', 'https://api.service24gps.com/api/v1')
 GPS_APIKEY = os.getenv('GPS_APIKEY', '')
 GPS_USERNAME = os.getenv('GPS_USERNAME', '')
 GPS_PASSWORD = os.getenv('GPS_PASSWORD', '')
 
 
-# --- Acceso al dashboard: catálogo de usuarios -----------------------------
-#
-# ===== AQUÍ SE AGREGAN O SE QUITAN USUARIOS. No hay usuarios en base de =====
-# ===== datos: esta tabla es la única fuente de verdad.                 =====
-#
-# Cada entrada tiene dos cosas:
-#
-#   'clave'    la contraseña. Distingue mayúsculas de minúsculas.
-#              El usuario NO: se busca en minúsculas, así que "Procaps",
-#              "procaps" y "PROCAPS" entran a la misma cuenta.
-#
-#   'empresas' de qué empresas puede ver los viajes; son los valores de
-#              tracking.services.EMPRESAS. None = acceso total (todas las
-#              pestañas y también el mapa de flota en vivo, /mapa/).
-#
-# Lo que NO se pudo atribuir a ninguna empresa (la pestaña «Sin identificar»)
-# se le agrega a todos los usuarios, aquí no hay que ponerlo: lo hace
-# tracking.services.tabs_permitidas. Como la única geocerca creada hoy es la
-# de PROCAPS, casi toda la actividad de DITAR y RELIANZ cae ahí, y sin eso sus
-# usuarios verían el dashboard vacío.
-#
-# Quién ve qué lo aplican tracking/views.py (las pestañas que se dibujan y el
-# filtro del endpoint JSON) y tracking/middleware.py (exige sesión iniciada).
-#
-# Las contraseñas están en el código porque el sitio se despliega desde el
-# repo, pero cada una se puede sobrescribir por variable de entorno en el .env
-# (que no se sube a git) sin tocar este archivo.
 DASHBOARD_USUARIOS = {
-    #  usuario        contraseña                                  empresas que ve
     'admin':   {'clave': os.getenv('DASHBOARD_CLAVE_ADMIN', 'Admin'),
-                'empresas': None},                                # todas
+                'empresas': None},
     'procaps': {'clave': os.getenv('DASHBOARD_CLAVE_PROCAPS', 'Procaps'),
                 'empresas': ('PROCAPS',)},
     'ditar':   {'clave': os.getenv('DASHBOARD_CLAVE_DITAR', 'Ditar'),
@@ -99,37 +61,15 @@ DASHBOARD_USUARIOS = {
                 'empresas': ('RELIANZ',)},
 }
 
-# La sesión viaja dentro de una cookie firmada, NO en la base de datos.
-#
-# Es lo que hace que este login no necesite base de datos ni "migrate": no hay
-# tabla django_session que crear. Lo único que se guarda es la marca de
-# "ya entró", y va firmada con SECRET_KEY, así que el navegador puede leerla
-# pero no puede inventarla.
-#
-# Por eso SECRET_KEY tiene que ser secreta de verdad en producción: quien la
-# sepa puede fabricarse una sesión válida.
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 
-# La sesión dura una jornada de trabajo y se renueva en cada visita.
 SESSION_COOKIE_AGE = 12 * 60 * 60
 SESSION_SAVE_EVERY_REQUEST = True
 
-# La cookie se manda sin fecha de vencimiento, así que el navegador la borra al
-# cerrarse. Es la mitad servidor de "cerrar y volver a entrar pide contraseña":
-# funciona aunque el navegador no ejecute JavaScript. La otra mitad —cerrar solo
-# la pestaña, con el navegador abierto, que la cookie no distingue— la pone el
-# guardia de pestaña de tracking/base.html.
-#
-# SESSION_COOKIE_AGE sigue contando: el backend de cookies firmadas valida la
-# antigüedad de la firma al leerla, así que el tope de 12 h se respeta igual.
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-# Fuera de desarrollo las cookies solo viajan por HTTPS.
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 
-# En Render el HTTPS lo termina el proxy y a Django le llega HTTP, así que sin
-# esto request.is_secure() sería siempre False y las cookies "secure" nunca se
-# enviarían. La cabecera la pone el propio proxy de Render.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
@@ -147,8 +87,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    # WhiteNoise sirve los archivos estáticos (CSS/JS) en producción,
-    # porque gunicorn solo ejecuta Python y no entrega archivos.
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -156,8 +94,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    # Va de última: exige haber iniciado sesión para ver cualquier página del
-    # dashboard. Necesita la sesión y el CSRF ya resueltos, por eso el orden.
     'tracking.middleware.LoginRequeridoMiddleware',
 ]
 
@@ -228,6 +164,4 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-# Carpeta donde "collectstatic" junta todos los estáticos para producción.
-# Render la genera durante el build; no se sube a git.
 STATIC_ROOT = BASE_DIR / 'staticfiles'

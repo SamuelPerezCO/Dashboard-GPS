@@ -1,30 +1,12 @@
 {% extends 'tracking/base.html' %}
-{% comment %}
-=============================================================================
- ACCESO — formulario de entrada al dashboard
-=============================================================================
-No hay usuarios en base de datos: se compara contra el catálogo
-DASHBOARD_USUARIOS de config/settings.py (ver tracking/views.py:login_view).
-Cada usuario ve solo los viajes de su empresa; el de acceso total los ve todos.
-
-Esta página es la única que se puede ver sin sesión iniciada; de eso se
-encarga tracking/middleware.py. Por eso oculta el menú y el nombre del
-cliente del encabezado: todavía no hay nadie dentro.
-=============================================================================
-{% endcomment %}
 {% block title %}Entrar — Rastrelital{% endblock %}
 
-{# Sin sesión no hay menú, ni cliente, ni botón de salir: solo la marca. #}
 {% block barra %}{% endblock %}
 
-{# Tampoco hay pestaña que vigilar: aquí es donde se entra. Dejar el guardia
-   activo sería pedirle cerrar una sesión que no existe, una y otra vez. #}
 {% block guardia_pestana %}{% endblock %}
 
 {% block head %}
 <style>
-  /* Tarjeta centrada en la parte alta de la página, no en el medio: así no
-     salta cuando aparece el mensaje de error. */
   .acceso {
     max-width: 340px; margin: 8vh auto 0;
     background: var(--surface-1); border: 1px solid var(--border);

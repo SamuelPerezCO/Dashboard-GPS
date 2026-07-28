@@ -1,22 +1,5 @@
 <!doctype html>
 {% load static %}
-{% comment %}
-=============================================================================
- PLANTILLA BASE — el "esqueleto" que comparten los dos dashboards
-=============================================================================
-fleet.html y onbus.html "extienden" este archivo: heredan la cabecera, el
-menú, los estilos y las funciones de JavaScript, y solo rellenan los huecos
-marcados con {% block %}.
-
-Contiene:
- - La paleta de colores como variables CSS (--series-1, --text-primary...).
-   Hay dos versiones: clara y oscura; el navegador elige según el sistema.
- - Estilos compartidos: tarjetas de estadísticas (.tile), tarjetas (.card),
-   tablas, y el tooltip flotante de las gráficas.
- - Funciones JS compartidas: fmt() para formatear números, mostrarAviso()
-   para errores, y tooltipShow/Move/Hide() para el tooltip de las gráficas.
-=============================================================================
-{% endcomment %}
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -74,12 +57,6 @@ Contiene:
     position: sticky; top: 0; z-index: 1100;
   }
   header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
-  /* Marca de producto, estilo CRM: mosaico cuadrado de esquinas redondeadas
-     con el glifo del globo, y el nombre en texto al lado. Antes era el JPG
-     completo recortado en círculo con un anillo de color, que se leía como
-     foto de perfil de red social (y a 40px el texto del JPG no se distinguía).
-     El glifo va en SVG para que se vea nítido y funcione en tema claro y
-     oscuro; el JPG original quedó como favicon. */
   header .logo-mark { display: flex; flex: none; }
   header .logo-mark svg { display: block; }
   header .marca { display: flex; align-items: center; gap: 10px; }
@@ -88,7 +65,6 @@ Contiene:
     color: var(--text-muted); font-size: 11px; font-weight: 500;
     letter-spacing: 0.02em;
   }
-  /* Separador entre la marca y el menú, como en la barra de un CRM. */
   header .divisor { width: 1px; height: 26px; background: var(--border); flex: none; }
   nav { display: flex; gap: 4px; }
   nav a {
@@ -97,23 +73,18 @@ Contiene:
   }
   nav a:hover { background: var(--grid); }
   nav a.active { color: var(--text-primary); background: var(--grid); }
-  /* Nombre del cliente (empresa dueña de la flota) a la derecha del header. */
   .marca-cliente {
     margin-left: auto; display: flex; flex-direction: column;
     align-items: flex-end; gap: 2px;
   }
   .marca-cliente .nombre { font-size: 15px; font-weight: 650; }
   #estado { color: var(--text-muted); font-size: 12px; }
-  /* Usuario dentro de la sesión. Importa verlo: cada usuario ve un dashboard
-     distinto (solo los viajes de su empresa), así que un cero puede ser "no
-     hubo viajes" o "entraste con la cuenta equivocada". */
   header .usuario {
     display: flex; align-items: center; gap: 6px; flex: none;
     color: var(--text-secondary); font-size: 13px; font-weight: 550;
     border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px;
   }
   header .usuario .punto { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
-  /* Botón de cerrar sesión: discreto, para no competir con el menú. */
   header .salir { display: flex; }
   header .salir button {
     background: none; border: 1px solid var(--border); border-radius: 6px;
@@ -174,29 +145,11 @@ Contiene:
   #tooltip .t-row { color: var(--text-secondary); }
   #tooltip .t-row b { color: var(--text-primary); font-weight: 650; }
 </style>
-{% comment %}
-Guardia de pestaña: cerrar la pestaña tiene que pedir usuario y contraseña otra
-vez. La cookie de sesión no sirve para eso —es del navegador entero y sobrevive
-a cerrar la pestaña—, así que la pestaña se marca aparte en sessionStorage, que
-es lo único que el navegador borra justo cuando la pestaña desaparece.
-
-  - Se entra por el formulario  -> el servidor manda "sesion_nueva" y la
-    pestaña queda sellada.
-  - Recargar o navegar dentro de la misma pestaña -> el sello sigue ahí.
-  - Pestaña nueva (o reabierta) sobre una cookie que todavía valía -> no hay
-    sello: se cierra la sesión en el servidor y se vuelve al formulario.
-
-Va en el <head> y antes que nada para que el dashboard no alcance a pintarse en
-una pestaña que va a rebotar al login. login.html deja este bloque vacío: ahí no
-hay sesión que vigilar y cerrarla otra vez sería un ciclo infinito.
-{% endcomment %}
 {% block guardia_pestana %}
 <script>
   (function () {
     var SELLO = 'rastrelital_pestana';
-    // Si sessionStorage no se puede tocar (modos de privacidad que lo bloquean)
-    // no hay forma de reconocer la pestaña. Se deja pasar en vez de arriesgar
-    // un ciclo de cierres de sesión que dejaría el dashboard inservible.
+
     var almacen;
     try {
       almacen = window.sessionStorage;
@@ -207,8 +160,7 @@ hay sesión que vigilar y cerrarla otra vez sería un ciclo infinito.
     if (almacen.getItem(SELLO)) { return; }
 
     document.documentElement.style.visibility = 'hidden';
-    // Cerrar de verdad, no solo mandar al login: mientras la cookie siga
-    // firmada y viva, el propio login redirige de vuelta al dashboard.
+
     fetch('{% url "tracking:logout" %}', {
       method: 'POST',
       headers: { 'X-CSRFToken': '{{ csrf_token }}' },
@@ -223,10 +175,6 @@ hay sesión que vigilar y cerrarla otra vez sería un ciclo infinito.
 <body>
 <header>
   <div class="marca">
-    {% comment %}
-    Glifo de marca: globo con meridianos, una simplificación del logo RTL
-    para que se lea bien a 34px. Decorativo: el nombre va en el <h1>.
-    {% endcomment %}
     <span class="logo-mark" aria-hidden="true">
       <svg viewBox="0 0 34 34" width="34" height="34">
         <linearGradient id="marca-rtl" x1="0" y1="0" x2="1" y2="1">
@@ -246,14 +194,8 @@ hay sesión que vigilar y cerrarla otra vez sería un ciclo infinito.
       <span class="tagline">Rastreo satelital</span>
     </div>
   </div>
-  {% comment %}
-  Todo lo que sigue solo tiene sentido con la sesión iniciada, así que va en
-  un bloque que login.html deja vacío.
-  {% endcomment %}
   {% block barra %}
   <span class="divisor"></span>
-  {# El menú solo muestra el dashboard principal; la vista de mapa sigue #}
-  {# disponible escribiendo /mapa/ en el navegador (guardada para después). #}
   <nav>
     <a href="{% url 'tracking:dashboard' %}" class="active">Dashboard</a>
   </nav>
@@ -261,13 +203,11 @@ hay sesión que vigilar y cerrarla otra vez sería un ciclo infinito.
     <span class="nombre">Expreso Brasilia</span>
     <span id="estado"></span>
   </div>
-  {# Con qué cuenta se entró: define qué viajes se están viendo. #}
   {% if usuario %}
   <span class="usuario" title="Sesión iniciada como {{ usuario }}">
     <span class="punto" aria-hidden="true"></span>{{ usuario }}
   </span>
   {% endif %}
-  {# Por POST y con token CSRF: así nadie puede cerrarte la sesión desde fuera. #}
   <form class="salir" method="post" action="{% url 'tracking:logout' %}">
     {% csrf_token %}
     <button type="submit">Salir</button>

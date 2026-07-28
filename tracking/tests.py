@@ -1,14 +1,3 @@
-"""Pruebas de la app tracking.
-
-Ninguna prueba toca el API de Service24GPS: todo lo que sale a la red
-(:mod:`tracking.api_client`) se reemplaza con ``mock``, así que la suite
-corre sin credenciales, sin internet y en un par de segundos.
-
-Ejecutar con::
-
-    python manage.py test
-"""
-
 from datetime import date, datetime
 from unittest.mock import patch
 
@@ -22,18 +11,6 @@ from .middleware import CLAVE_SESION, CLAVE_USUARIO
 
 
 def _alerta(equipo, hora, geocerca, fecha='2026-07-20', fuera=False):
-    """Arma una alerta con la forma exacta que devuelve el API.
-
-    Args:
-        equipo: Identificador del equipo GPS.
-        hora: Hora de la alerta (``HH:MM:SS``).
-        geocerca: Nombre de la geocerca a incrustar en la descripción.
-        fecha: Fecha de la alerta, en formato ``YYYY-MM-DD``.
-        fuera: Si es True, arma una alerta de SALIDA de la geocerca.
-
-    Returns:
-        Diccionario de alerta listo para usar en las pruebas.
-    """
     sentido = 'FUERA DE LA' if fuera else 'DENTRO DE'
     return {
         'Equipo': equipo,
@@ -47,15 +24,12 @@ def _alerta(equipo, hora, geocerca, fecha='2026-07-20', fuera=False):
 
 
 class NombreGeocercaTests(TestCase):
-    """Extracción del nombre de la geocerca del texto de la alerta."""
-
     def test_extrae_el_nombre(self):
         self.assertEqual(
             services._nombre_geocerca(_alerta('1', '08:00:00', 'PROCAPS')),
             'PROCAPS')
 
     def test_deshace_entidades_html(self):
-        """El API escapa el texto: 'RUTA 3 &amp; 4' debe volver a '&'."""
         alerta = _alerta('1', '08:00:00', 'RUTA 3 &amp; 4')
         self.assertEqual(services._nombre_geocerca(alerta), 'RUTA 3 & 4')
 
@@ -65,17 +39,13 @@ class NombreGeocercaTests(TestCase):
 
 
 class EmpresaDeGeocercaTests(TestCase):
-    """La empresa se infiere del nombre de la geocerca y de nada más."""
-
     def test_procaps_va_anclado_al_inicio(self):
         self.assertEqual(services.empresa_de_geocerca('PROCAPS'), 'PROCAPS')
         self.assertEqual(services.empresa_de_geocerca('procaps planta'), 'PROCAPS')
         self.assertEqual(services.empresa_de_geocerca('RUTA 12'), 'PROCAPS')
-        # "PROCAPS" en medio del nombre NO cuenta: el patrón lleva ^.
         self.assertIsNone(services.empresa_de_geocerca('MI PROCAPS'))
 
     def test_ditar_y_relianz_en_cualquier_parte(self):
-        """Esas geocercas aún no existen: deben reconocerse se llamen como se llamen."""
         for nombre in ('DITAR', 'BODEGA DITAR', 'ditar planta 2'):
             self.assertEqual(services.empresa_de_geocerca(nombre), 'DITAR', nombre)
         for nombre in ('RELIANZ', 'CD RELIANZ NORTE', 'relianz'):
@@ -91,8 +61,6 @@ class EmpresaDeGeocercaTests(TestCase):
 
 
 class TabDeEmpresaTests(TestCase):
-    """Cada empresa tiene pestaña propia; lo no atribuible cae en una aparte."""
-
     def test_cada_empresa_a_su_pestana(self):
         for e in ('PROCAPS', 'DITAR', 'RELIANZ'):
             self.assertEqual(services.tab_de_empresa(e), e)
@@ -106,13 +74,10 @@ class TabDeEmpresaTests(TestCase):
 
 
 class TabsPermitidasTests(TestCase):
-    """De las empresas de un usuario a las pestañas que ve."""
-
     def test_sin_restriccion_ve_todo(self):
         self.assertEqual(services.tabs_permitidas(None), list(services.EMPRESAS))
 
     def test_una_empresa_ve_la_suya_y_sin_identificar(self):
-        """Lo no atribuible va en todas las ventanas, sea de quien sea."""
         self.assertEqual(services.tabs_permitidas(['PROCAPS']),
                          ['PROCAPS', services.TAB_SIN_IDENTIFICAR])
         self.assertEqual(services.tabs_permitidas(['DITAR']),
@@ -132,8 +97,6 @@ class TabsPermitidasTests(TestCase):
 
 
 class EntradaGeocercaTests(TestCase):
-    """Solo las ENTRADAS cuentan como servicio; las salidas se descartan."""
-
     def test_entrada_cuenta(self):
         self.assertTrue(services._es_entrada_geocerca(_alerta('1', '08:00:00', 'PROCAPS')))
 
@@ -147,8 +110,6 @@ class EntradaGeocercaTests(TestCase):
 
 
 class EmpresaDeTimbradaTests(TestCase):
-    """Una timbrada se atribuye a la empresa del siguiente servicio del bus."""
-
     SERVICIOS = [('08:00:00', 'PROCAPS'), ('14:00:00', 'DITAR')]
 
     def test_toma_el_servicio_siguiente(self):
@@ -166,8 +127,6 @@ class EmpresaDeTimbradaTests(TestCase):
 
 
 class NormalizarInternoTests(TestCase):
-    """La capacidad se busca por interno normalizado (sin espacios, mayúsculas)."""
-
     def test_normaliza(self):
         self.assertEqual(services._norm_interno('INT 7074'), 'INT7074')
         self.assertEqual(services._norm_interno('  int  7074 '), 'INT7074')
@@ -182,13 +141,6 @@ class NormalizarInternoTests(TestCase):
 @patch.object(services.api_client, 'get_vehicles')
 @patch.object(services.api_client, 'get_passenger_events')
 class RangeSummaryTests(TestCase):
-    """El cálculo completo de ocupación, con el API simulado.
-
-    Los decoradores entregan los mocks al revés de como se escriben: el
-    de más abajo (``get_passenger_events``) llega primero.
-    """
-
-    # Dos buses: uno con capacidad conocida (INT 7076 = 31) y otro sin ella.
     VEHICULOS = [
         {'idgps': '100', 'nombre': 'INT 7076'},
         {'idgps': '200', 'nombre': 'INT 9999'},
@@ -199,10 +151,8 @@ class RangeSummaryTests(TestCase):
 
     def test_cuenta_servicios_timbradas_y_ocupacion(self, eventos, vehiculos, alertas):
         vehiculos.return_value = self.VEHICULOS
-        # El bus 100 entra 2 veces a PROCAPS…
         alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
                                 _alerta('100', '14:00:00', 'PROCAPS')]
-        # …y timbra 31 pasajeros en total.
         eventos.side_effect = lambda equipo, *a, **k: (
             [{'fecha': '2026-07-20', 'hora': '08:30:00', 'pasajero': 'a'}] * 31
             if equipo == '100' else [])
@@ -213,10 +163,8 @@ class RangeSummaryTests(TestCase):
         self.assertEqual(por_interno['INT 7076']['servicios'], 2)
         self.assertEqual(por_interno['INT 7076']['timbradas'], 31)
         self.assertEqual(por_interno['INT 7076']['capacidad'], 31)
-        # 31 timbradas / (2 servicios x 31 asientos) = 50 %
         self.assertEqual(por_interno['INT 7076']['ocupacion'], 50)
         self.assertEqual(por_interno['INT 7076']['capacidad_total'], 62)
-        # Sin capacidad conocida no se inventa un porcentaje.
         self.assertIsNone(por_interno['INT 9999']['ocupacion'])
         self.assertEqual(r['unidades_con_error'], 0)
 
@@ -225,8 +173,8 @@ class RangeSummaryTests(TestCase):
         alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
                                 _alerta('100', '14:00:00', 'DITAR')]
         eventos.side_effect = lambda equipo, *a, **k: [
-            {'fecha': '2026-07-20', 'hora': '07:00:00', 'pasajero': 'a'},   # -> PROCAPS
-            {'fecha': '2026-07-20', 'hora': '13:00:00', 'pasajero': 'b'},   # -> DITAR
+            {'fecha': '2026-07-20', 'hora': '07:00:00', 'pasajero': 'a'},
+            {'fecha': '2026-07-20', 'hora': '13:00:00', 'pasajero': 'b'},
         ]
 
         procaps = services.range_summary('2026-07-20', '2026-07-20', 'PROCAPS')
@@ -238,11 +186,9 @@ class RangeSummaryTests(TestCase):
         self.assertEqual(ditar['vehiculos'][0]['timbradas'], 1)
 
     def test_la_ocupacion_lleva_dos_decimales(self, eventos, vehiculos, alertas):
-        """Redondear a entero juntaba buses que no van igual de llenos."""
         vehiculos.return_value = self.VEHICULOS[:1]
         alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
                                 _alerta('100', '14:00:00', 'PROCAPS')]
-        # 58 timbradas / (2 servicios x 31 asientos) = 93,548... -> 93,55 %
         eventos.side_effect = lambda equipo, *a, **k: (
             [{'fecha': '2026-07-20', 'hora': '08:30:00', 'pasajero': 'a'}] * 58)
 
@@ -252,13 +198,12 @@ class RangeSummaryTests(TestCase):
         self.assertEqual(r['ocupacion_flota'], 93.55)
 
     def test_todas_respeta_el_techo_del_usuario(self, eventos, vehiculos, alertas):
-        """Sin empresa elegida, un usuario de PROCAPS no suma viajes de DITAR."""
         vehiculos.return_value = self.VEHICULOS[:1]
         alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
                                 _alerta('100', '14:00:00', 'DITAR')]
         eventos.side_effect = lambda equipo, *a, **k: [
-            {'fecha': '2026-07-20', 'hora': '07:00:00', 'pasajero': 'a'},   # -> PROCAPS
-            {'fecha': '2026-07-20', 'hora': '13:00:00', 'pasajero': 'b'},   # -> DITAR
+            {'fecha': '2026-07-20', 'hora': '07:00:00', 'pasajero': 'a'},
+            {'fecha': '2026-07-20', 'hora': '13:00:00', 'pasajero': 'b'},
         ]
 
         r = services.range_summary('2026-07-20', '2026-07-20', None,
@@ -266,15 +211,13 @@ class RangeSummaryTests(TestCase):
 
         self.assertEqual(r['vehiculos'][0]['servicios'], 1)
         self.assertEqual(r['vehiculos'][0]['timbradas'], 1)
-        # El JSON tampoco nombra las empresas que el usuario no puede ver.
         self.assertEqual(r['empresas'], ['PROCAPS', services.TAB_SIN_IDENTIFICAR])
         self.assertNotIn('DITAR', r['etiquetas'])
 
     def test_lo_sin_identificar_va_en_todas_las_ventanas(self, eventos,
                                                         vehiculos, alertas):
-        """Un viaje sin empresa lo ve cualquier usuario, no solo el admin."""
         vehiculos.return_value = self.VEHICULOS[:1]
-        alertas.return_value = []          # sin servicios: nada que atribuir
+        alertas.return_value = []
         eventos.side_effect = lambda equipo, *a, **k: [
             {'fecha': '2026-07-20', 'hora': '09:00:00', 'pasajero': 'a'}]
 
@@ -285,9 +228,8 @@ class RangeSummaryTests(TestCase):
 
     def test_las_timbradas_sin_servicio_caen_en_sin_identificar(self, eventos,
                                                                 vehiculos, alertas):
-        """Si el bus no entró a ninguna geocerca, su timbrada no se pierde."""
         vehiculos.return_value = self.VEHICULOS[:1]
-        alertas.return_value = []          # ningún servicio ese día
+        alertas.return_value = []
         eventos.side_effect = lambda equipo, *a, **k: [
             {'fecha': '2026-07-20', 'hora': '09:00:00', 'pasajero': 'a'}]
 
@@ -300,7 +242,6 @@ class RangeSummaryTests(TestCase):
 
     def test_un_fallo_del_api_se_reporta_y_no_tumba_el_dashboard(self, eventos,
                                                                  vehiculos, alertas):
-        """Una unidad caída no puede verse igual que una sin pasajeros."""
         vehiculos.return_value = self.VEHICULOS
         alertas.return_value = []
 
@@ -314,7 +255,7 @@ class RangeSummaryTests(TestCase):
             r = services.range_summary('2026-07-20', '2026-07-20')
 
         self.assertEqual(r['unidades_con_error'], 1)
-        self.assertEqual(len(r['vehiculos']), 2)   # el resto sí se calcula
+        self.assertEqual(len(r['vehiculos']), 2)
 
     def test_invierte_el_rango_al_reves(self, eventos, vehiculos, alertas):
         vehiculos.return_value = []
@@ -333,20 +274,11 @@ class RangeSummaryTests(TestCase):
 
 
 class SinBaseDeDatosTests(TestCase):
-    """El login no puede depender de la base de datos.
-
-    En producción (Render) el build no corre ``migrate`` y el disco es
-    efímero, así que la tabla ``django_session`` no existe: guardar la
-    sesión en base de datos tumbaba el login entero con
-    ``OperationalError: no such table: django_session``.
-    """
-
     def test_la_sesion_va_en_cookie_firmada(self):
         self.assertEqual(settings.SESSION_ENGINE,
                          'django.contrib.sessions.backends.signed_cookies')
 
     def test_entrar_no_escribe_en_la_base_de_datos(self):
-        """Iniciar sesión no debe ejecutar ni una sola consulta SQL."""
         with self.assertNumQueries(0):
             r = self.client.post(reverse('tracking:login'),
                                  {'usuario': 'admin', 'clave': 'Admin'})
@@ -360,10 +292,8 @@ class SinBaseDeDatosTests(TestCase):
 
 
 class PrecalentamientoTests(TestCase):
-    """El login precalienta la consulta inicial mientras escriben la clave."""
-
     def setUp(self):
-        cache.clear()          # la marca de "ya se está precalentando" vive ahí
+        cache.clear()
         self.login_url = reverse('tracking:login')
 
     def test_el_rango_es_el_ultimo_mes(self):
@@ -374,7 +304,6 @@ class PrecalentamientoTests(TestCase):
         self.assertEqual((d2 - d1).days, services.DIAS_ULTIMO_MES)
 
     def test_precalienta_exactamente_ese_rango(self):
-        """Si el rango difiere en un día, el cache no le sirve al navegador."""
         with patch.object(services, 'range_summary') as resumen:
             services.precalentar_ultimo_mes()
         resumen.assert_called_once_with(*services.rango_ultimo_mes())
@@ -386,7 +315,6 @@ class PrecalentamientoTests(TestCase):
             target=views._precalentar_dashboard,
             name='precalentar-dashboard', daemon=True)
         hilos.Thread.return_value.start.assert_called_once()
-        # Una segunda visita dentro de la ventana no lanza otro hilo.
         self.client.get(self.login_url)
         hilos.Thread.assert_called_once()
 
@@ -397,17 +325,15 @@ class PrecalentamientoTests(TestCase):
 
     @patch.object(views, 'threading')
     def test_con_sesion_iniciada_no_precalienta(self, hilos):
-        """Con sesión, /entrar/ redirige antes de llegar al precalentamiento."""
         self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
         self.client.get(self.login_url)
         hilos.Thread.assert_not_called()
 
     def test_un_fallo_no_se_escapa_del_hilo(self):
-        """El hilo corre sin nadie que lo espere: un error solo va al log."""
         with patch.object(views.services, 'precalentar_ultimo_mes',
                           side_effect=RuntimeError('boom')):
             with self.assertLogs('tracking.views', level='ERROR'):
-                views._precalentar_dashboard()   # no debe lanzar excepción
+                views._precalentar_dashboard()
 
     def test_sin_credenciales_solo_se_anota(self):
         with patch.object(views.services, 'precalentar_ultimo_mes',
@@ -418,13 +344,9 @@ class PrecalentamientoTests(TestCase):
 
 
 class LoginTests(TestCase):
-    """El acceso al dashboard: quién entra, quién no y cómo se frena."""
-
     def setUp(self):
-        cache.clear()          # el freno de intentos vive en el cache
+        cache.clear()
         self.login_url = reverse('tracking:login')
-        # El GET del login lanza el precalentamiento en un hilo real que
-        # consultaría el API: aquí se anula para que la suite siga sin red.
         parche = patch.object(views, '_lanzar_precalentamiento',
                               return_value=False)
         parche.start()
@@ -439,11 +361,9 @@ class LoginTests(TestCase):
                                  fetch_redirect_response=False)
 
     def test_la_portada_se_ve_sin_sesion(self):
-        """La portada es la cara pública del sitio: no debe pedir nada."""
         r = self.client.get(reverse('tracking:home'))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Nuestras Soluciones')
-        # Y lleva al dashboard, que es lo único que este proyecto le agrega.
         self.assertContains(r, f'href="{reverse("tracking:dashboard")}"')
         self.assertContains(r, 'DASHBOARD')
 
@@ -451,7 +371,6 @@ class LoginTests(TestCase):
         r = self.client.get(self.login_url)
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Rastrelital')
-        # Sin sesión no se muestra el menú, ni el cliente, ni el botón de salir.
         self.assertNotContains(r, 'Expreso Brasilia')
         self.assertNotContains(r, '>Salir<')
 
@@ -484,7 +403,7 @@ class LoginTests(TestCase):
         self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
         salir = reverse('tracking:logout')
 
-        self.client.get(salir)   # un GET no debe cerrar nada
+        self.client.get(salir)
         self.assertTrue(self.client.session.get(CLAVE_SESION))
 
         self.client.post(salir)
@@ -493,26 +412,16 @@ class LoginTests(TestCase):
     def test_freno_tras_varios_intentos_fallidos(self):
         for _ in range(views.MAX_INTENTOS):
             self.client.post(self.login_url, {'usuario': 'x', 'clave': 'y'})
-        # Ahora ni la contraseña buena entra.
         r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
         self.assertContains(r, 'Demasiados intentos')
         self.assertFalse(self.client.session.get(CLAVE_SESION))
 
     def test_el_admin_conserva_su_propio_login(self):
-        """El middleware no debe secuestrar /admin/, que ya se autentica solo."""
         r = self.client.get('/admin/')
         self.assertNotIn(self.login_url, r.headers.get('Location', ''))
 
 
 class AccesoPorEmpresaTests(TestCase):
-    """Cada usuario entra a lo suyo y nada más.
-
-    Los cuatro usuarios viven en ``settings.DASHBOARD_USUARIOS``; aquí se
-    prueba que el reparto se aplique de verdad, tanto en las pestañas que
-    se dibujan como en el endpoint JSON (que es lo único que importa: la
-    plantilla se puede saltar escribiendo la URL a mano).
-    """
-
     def setUp(self):
         cache.clear()
         self.login_url = reverse('tracking:login')
@@ -528,16 +437,16 @@ class AccesoPorEmpresaTests(TestCase):
         for usuario, clave in (('admin', 'Admin'), ('procaps', 'Procaps'),
                                ('ditar', 'Ditar'), ('relianz', 'relianz')):
             self.client.post(reverse('tracking:logout'))
-            cache.clear()                       # el freno de intentos por IP
+            cache.clear()
             self.entrar(usuario, clave)
             self.assertEqual(self.client.session.get(CLAVE_USUARIO), usuario)
 
     def test_el_usuario_no_distingue_mayusculas_pero_la_clave_si(self):
-        self.entrar('PROCAPS', 'Procaps')       # nombre en mayúsculas: entra
+        self.entrar('PROCAPS', 'Procaps')
         self.assertEqual(self.client.session.get(CLAVE_USUARIO), 'procaps')
 
         self.client.post(reverse('tracking:logout'))
-        self.entrar('procaps', 'procaps')       # clave en minúsculas: no entra
+        self.entrar('procaps', 'procaps')
         self.assertFalse(self.client.session.get(CLAVE_SESION))
 
     def test_cada_usuario_dibuja_solo_sus_pestanas(self):
@@ -553,7 +462,6 @@ class AccesoPorEmpresaTests(TestCase):
                                   'relianz': 'relianz'}[usuario])
             r = self.client.get(reverse('tracking:dashboard'))
             self.assertContains(r, f'data-empresa="{propia}"')
-            # «Sin identificar» va en todas las ventanas.
             self.assertContains(r, f'data-empresa="{services.TAB_SIN_IDENTIFICAR}"')
             for ajena in ajenas:
                 self.assertNotContains(r, f'data-empresa="{ajena}"')
@@ -565,7 +473,6 @@ class AccesoPorEmpresaTests(TestCase):
             self.assertContains(r, f'data-empresa="{valor}"')
 
     def test_el_json_rechaza_la_empresa_ajena(self):
-        """Ocultar la pestaña no basta: la URL se puede escribir a mano."""
         self.entrar('procaps', 'Procaps')
         r = self.client.get(reverse('tracking:api_dashboard'), {'empresa': 'DITAR'})
         self.assertEqual(r.status_code, 403)
@@ -581,7 +488,6 @@ class AccesoPorEmpresaTests(TestCase):
         self.assertEqual(resumen.call_count, 2)
 
     def test_el_json_le_pasa_el_techo_del_usuario_a_services(self):
-        """Sin empresa, «Todas» tiene que seguir siendo "todas las suyas"."""
         self.entrar('ditar', 'Ditar')
         with patch.object(services, 'range_summary', return_value={}) as resumen:
             self.client.get(reverse('tracking:api_dashboard'),
@@ -591,7 +497,6 @@ class AccesoPorEmpresaTests(TestCase):
             ['DITAR', services.TAB_SIN_IDENTIFICAR])
 
     def test_el_mapa_de_flota_es_solo_del_admin(self):
-        """El mapa muestra la flota entera, que no está repartida por empresa."""
         self.entrar('relianz', 'relianz')
         r = self.client.get(reverse('tracking:fleet'))
         self.assertRedirects(r, reverse('tracking:dashboard'),
@@ -604,7 +509,6 @@ class AccesoPorEmpresaTests(TestCase):
         self.assertEqual(self.client.get(reverse('tracking:fleet')).status_code, 200)
 
     def test_quitar_un_usuario_del_catalogo_cierra_su_sesion(self):
-        """Los permisos se releen del catálogo, no se guardan en la cookie."""
         self.entrar('procaps', 'Procaps')
         catalogo = {k: v for k, v in settings.DASHBOARD_USUARIOS.items()
                     if k != 'procaps'}
@@ -615,16 +519,6 @@ class AccesoPorEmpresaTests(TestCase):
 
 
 class PestanaTests(TestCase):
-    """Cerrar la pestaña tiene que volver a pedir usuario y contraseña.
-
-    La cookie de sesión no alcanza para eso: la comparten todas las
-    pestañas del navegador y sobrevive a cerrar una. Por eso el login
-    marca la primera página que se pinta (``sesion_nueva``), esa página
-    sella su pestaña en sessionStorage, y una pestaña sin sello cierra la
-    sesión sola. Aquí se prueba la mitad servidor; la del navegador es el
-    bloque "guardia_pestana" de base.html.
-    """
-
     def setUp(self):
         cache.clear()
         self.login_url = reverse('tracking:login')
@@ -643,14 +537,12 @@ class PestanaTests(TestCase):
         self.assertContains(r, 'rastrelital_pestana')
 
     def test_el_sello_es_de_un_solo_uso(self):
-        """La segunda carga ya es "otra pestaña" mientras no muestre el sello."""
         self.entrar()
         self.client.get(reverse('tracking:dashboard'))
         r = self.client.get(reverse('tracking:dashboard'))
         self.assertFalse(r.context['sesion_nueva'])
 
     def test_el_mapa_tambien_sella_al_entrar_directo(self):
-        """Con ?next=/mapa/ la página de entrada es el mapa, no el dashboard."""
         destino = reverse('tracking:fleet')
         self.client.post(self.login_url,
                          {'usuario': 'admin', 'clave': 'Admin', 'next': destino})
@@ -658,19 +550,12 @@ class PestanaTests(TestCase):
         self.assertTrue(r.context['sesion_nueva'])
 
     def test_el_login_no_lleva_guardia(self):
-        """Vigilar la pestaña en el propio login sería un ciclo de cierres."""
         r = self.client.get(self.login_url)
         self.assertNotContains(r, 'rastrelital_pestana')
 
     def test_el_cierre_de_la_guardia_pasa_el_csrf(self):
-        """El fetch del guardia manda el token por cabecera y debe ser aceptado.
-
-        Si el CSRF lo rechazara, la sesión quedaría viva: el rebote al
-        login volvería al dashboard, el guardia dispararía otra vez y la
-        página entraría en un ciclo sin fin en vez de pedir la clave.
-        """
         cliente = Client(enforce_csrf_checks=True)
-        cliente.get(self.login_url)      # deja la cookie csrftoken
+        cliente.get(self.login_url)
         cliente.post(self.login_url, {
             'usuario': 'admin', 'clave': 'Admin',
             'csrfmiddlewaretoken': cliente.cookies['csrftoken'].value})
@@ -682,11 +567,6 @@ class PestanaTests(TestCase):
         self.assertFalse(cliente.session.get(CLAVE_SESION))
 
     def test_la_cookie_muere_al_cerrar_el_navegador(self):
-        """Sin fecha de vencimiento el navegador la borra al cerrarse.
-
-        Es el respaldo de la guardia de pestaña para quien no ejecute
-        JavaScript.
-        """
         self.entrar()
         cookie = self.client.cookies['sessionid']
         self.assertEqual(cookie['max-age'], '')
@@ -694,8 +574,6 @@ class PestanaTests(TestCase):
 
 
 class DashboardTests(TestCase):
-    """La página del dashboard, ya con sesión iniciada."""
-
     def setUp(self):
         cache.clear()
         self.client.post(reverse('tracking:login'),

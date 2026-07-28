@@ -19,7 +19,5 @@ from django.urls import include, path
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # Todas las rutas de los dashboards viven en tracking/urls.py.
-    # Al incluirlas con '' quedan en la raíz del sitio (/, /onbus/, /api/...).
     path('', include('tracking.urls')),
 ]

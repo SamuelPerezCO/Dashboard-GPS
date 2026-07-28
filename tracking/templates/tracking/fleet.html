@@ -1,18 +1,4 @@
 {% extends 'tracking/base.html' %}
-{% comment %}
-=============================================================================
- DASHBOARD DE FLOTA
-=============================================================================
-Cómo funciona esta página:
- 1. Django entrega este HTML sin datos (solo la estructura).
- 2. Al cargar, el JavaScript de abajo llama a /api/fleet/ con fetch().
- 3. Con el JSON recibido pinta: las 4 tarjetas, el mapa y la tabla.
- 4. setInterval repite el paso 2-3 cada 60 segundos (auto-actualización).
-
-El mapa usa Leaflet (librería gratuita) con mosaicos de OpenStreetMap.
-Cada unidad es un círculo: verde = encendida, gris = apagada.
-=============================================================================
-{% endcomment %}
 {% block title %}Flota — Rastrelital{% endblock %}
 
 {% block head %}
