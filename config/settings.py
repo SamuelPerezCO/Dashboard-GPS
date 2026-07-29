@@ -37,11 +37,13 @@ ALLOWED_HOSTS = [
     'localhost', '127.0.0.1',
     'dashboardgps.qd.je',
     '.onrender.com',
+    '.vercel.app',
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     'https://dashboardgps.qd.je',
     'https://*.onrender.com',
+    'https://*.vercel.app',
 ]
 
 GPS_API_BASE_URL = os.getenv('GPS_API_BASE_URL', 'https://api.service24gps.com/api/v1')
@@ -71,6 +73,50 @@ SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+
+# Cache del dashboard.
+#
+# Aquí está todo el peso de la aplicación: services.py guarda las alertas de
+# cada día y las timbradas de cada bus con TTL de hasta 24 h, y sin cache cada
+# consulta le vuelve a pegar al API día por día y bus por bus.
+#
+# Con REDIS_URL puesto se usa Redis. Eso es lo que hace falta en un hosting
+# serverless como Vercel, donde cada petición puede caer en una instancia
+# distinta y las instancias se congelan entre peticiones: un cache en memoria
+# arrancaría vacío casi siempre. Sin la variable queda el cache en memoria del
+# proceso, que le basta a un servidor de toda la vida (Render) y al desarrollo
+# local, y así ninguno de los dos necesita un Redis al lado.
+REDIS_URL = os.getenv('REDIS_URL', '')
+
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            # El prefijo deja convivir varios despliegues en la misma base de
+            # Redis sin que se pisen las llaves.
+            'KEY_PREFIX': os.getenv('REDIS_PREFIX', 'dashboard-gps'),
+            'OPTIONS': {
+                # Sin tope de tiempo, un Redis que no contesta deja colgada la
+                # petición entera hasta que el hosting la corta. Es preferible
+                # que falle rápido y se vea el error.
+                'socket_connect_timeout': 3,
+                'socket_timeout': 3,
+            },
+        },
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'dashboard-gps',
+            # El tope de fábrica son 300 entradas y se llena rápido: es una
+            # por día consultado más una por bus, y al pasarse Django tira un
+            # tercio del cache.
+            'OPTIONS': {'MAX_ENTRIES': 5000},
+        },
+    }
 
 
 # Application definition
