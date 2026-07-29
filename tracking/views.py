@@ -75,12 +75,15 @@ def _empresas_permitidas(request):
 
 
 def home(request):
-    """La portada pública. Contenido fijo: no toca el API ni la sesión."""
+    """La portada pública, la que enseña el sitio sin pedir cuenta.
+
+    Contenido fijo: no toca el API ni la sesión.
+    """
     return render(request, 'tracking/home.html')
 
 
 def login_view(request):
-    """Formulario de acceso al dashboard.
+    """Formulario de acceso al dashboard, y la raíz del sitio.
 
     Compara contra DASHBOARD_USUARIOS: el usuario no distingue mayúsculas,
     la contraseña sí. Tras MAX_INTENTOS fallos desde la misma IP el login

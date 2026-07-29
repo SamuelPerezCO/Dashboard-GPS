@@ -393,8 +393,11 @@ class LoginTests(TestCase):
         r = self.client.get(reverse('tracking:home'))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Nuestras Soluciones')
-        self.assertContains(r, f'href="{reverse("tracking:dashboard")}"')
-        self.assertContains(r, 'DASHBOARD')
+        self.assertContains(r, f'href="{self.login_url}"')
+        self.assertContains(r, 'ENTRAR')
+
+    def test_el_login_es_la_raiz(self):
+        self.assertEqual(self.login_url, '/')
 
     def test_el_login_se_ve_sin_sesion(self):
         r = self.client.get(self.login_url)
@@ -402,6 +405,21 @@ class LoginTests(TestCase):
         self.assertContains(r, 'Rastrelital')
         self.assertNotContains(r, 'Expreso Brasilia')
         self.assertNotContains(r, '>Salir<')
+
+    def test_el_login_lleva_a_la_portada(self):
+        r = self.client.get(self.login_url)
+        self.assertContains(r, f'href="{reverse("tracking:home")}"')
+        self.assertContains(r, 'Ver la página web')
+
+    def test_la_url_vieja_del_login_sigue_sirviendo(self):
+        r = self.client.get(reverse('tracking:login_antiguo'))
+        self.assertRedirects(r, self.login_url, fetch_redirect_response=False)
+
+    def test_la_url_vieja_del_login_conserva_el_next(self):
+        destino = reverse('tracking:fleet')
+        r = self.client.get(reverse('tracking:login_antiguo'), {'next': destino})
+        self.assertRedirects(r, f'{self.login_url}?next={destino}',
+                             fetch_redirect_response=False)
 
     def test_credenciales_correctas(self):
         r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
@@ -446,8 +464,11 @@ class LoginTests(TestCase):
         self.assertFalse(self.client.session.get(CLAVE_SESION))
 
     def test_el_admin_conserva_su_propio_login(self):
+        # Ahora el login vive en '/', así que "no contiene el login" sería
+        # cierto para cualquier ruta: lo que se comprueba es que el admin
+        # redirige al suyo.
         r = self.client.get('/admin/')
-        self.assertNotIn(self.login_url, r.headers.get('Location', ''))
+        self.assertTrue(r.headers.get('Location', '').startswith('/admin/login'))
 
 
 class AccesoPorEmpresaTests(TestCase):

@@ -12,6 +12,7 @@
     background: var(--surface-1); border: 1px solid var(--border);
     border-radius: 12px; padding: 28px 26px;
   }
+  .acceso form { margin: 0; }
   .acceso h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
   .acceso .desc { color: var(--text-muted); font-size: 13px; margin: 0 0 20px; }
   .acceso label {
@@ -34,6 +35,23 @@
     padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer;
   }
   .acceso button:hover { filter: brightness(1.06); }
+  .acceso .separador {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text-muted); font-size: 11px; margin: 18px 0 14px;
+  }
+  .acceso .separador::before,
+  .acceso .separador::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+  .acceso .ver-sitio {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    width: 100%; text-decoration: none;
+    background: none; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 10px 14px; font-weight: 550;
+  }
+  .acceso .ver-sitio:hover { background: var(--grid); color: var(--text-primary); }
+  .acceso .ver-sitio svg { flex: none; }
   .acceso .error {
     background: color-mix(in srgb, var(--critical) 12%, transparent);
     border: 1px solid var(--critical); border-radius: 7px;
@@ -43,24 +61,37 @@
 {% endblock %}
 
 {% block content %}
-<form class="acceso" method="post" action="{% url 'tracking:login' %}">
-  {% csrf_token %}
-  <input type="hidden" name="next" value="{{ next }}">
-  <h2>Entrar</h2>
-  <p class="desc">Escribe tus datos para ver el dashboard.</p>
+<div class="acceso">
+  <form method="post" action="{% url 'tracking:login' %}">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <h2>Entrar</h2>
+    <p class="desc">Escribe tus datos para ver el dashboard.</p>
 
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
 
-  <div class="campo">
-    <label for="usuario">Usuario</label>
-    <input type="text" id="usuario" name="usuario" autocomplete="username"
-           autofocus required>
-  </div>
-  <div class="campo">
-    <label for="clave">Contraseña</label>
-    <input type="password" id="clave" name="clave"
-           autocomplete="current-password" required>
-  </div>
-  <button type="submit">Entrar</button>
-</form>
+    <div class="campo">
+      <label for="usuario">Usuario</label>
+      <input type="text" id="usuario" name="usuario" autocomplete="username"
+             autofocus required>
+    </div>
+    <div class="campo">
+      <label for="clave">Contraseña</label>
+      <input type="password" id="clave" name="clave"
+             autocomplete="current-password" required>
+    </div>
+    <button type="submit">Entrar</button>
+  </form>
+
+  <div class="separador">o</div>
+
+  <a class="ver-sitio" href="{% url 'tracking:home' %}">
+    <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M2.5 10h15M10 2.5c2 2.3 3 4.8 3 7.5s-1 5.2-3 7.5c-2-2.3-3-4.8-3-7.5s1-5.2 3-7.5z"
+            stroke="currentColor" stroke-width="1.5"/>
+    </svg>
+    Ver la página web
+  </a>
+</div>
 {% endblock %}

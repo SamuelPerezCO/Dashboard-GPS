@@ -54,15 +54,19 @@ class LoginRequeridoMiddleware:
         return self.get_response(request)
 
     def _libre(self, path):
-        """Rutas que se ven sin sesión: portada, login, /admin/ y estáticos.
+        """Rutas que se ven sin sesión: login, portada, /admin/ y estáticos.
 
-        La portada se compara completa: es '/', y por prefijo dejaría libre
-        el sitio entero.
+        Las páginas se comparan completas: el login es '/', y por prefijo
+        dejaría libre el sitio entero.
         """
-        if path == reverse('tracking:home'):
+        publicas = (
+            reverse('tracking:login'),
+            reverse('tracking:login_antiguo'),
+            reverse('tracking:home'),
+        )
+        if path in publicas:
             return True
         exentas = (
-            reverse('tracking:login'),
             '/admin/',
             settings.STATIC_URL or '/static/',
         )

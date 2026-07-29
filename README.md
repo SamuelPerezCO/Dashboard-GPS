@@ -71,7 +71,8 @@ pip install -r requirements.txt
 python manage.py runserver
 ```
 
-La portada pública queda en <http://localhost:8000/> y el dashboard en
+El login queda en <http://localhost:8000/>, la portada pública en
+<http://localhost:8000/inicio/> y el dashboard en
 <http://localhost:8000/dashboard/>.
 
 ## Configuración (`.env`)
@@ -101,9 +102,16 @@ DASHBOARD_CLAVE_RELIANZ=...
 
 ---
 
-## La portada pública (`/`)
+## La puerta de entrada (`/`)
 
-La raíz del sitio es una **copia de <https://www.rastrelital.com>**: los mismos
+La raíz del sitio es el **formulario de acceso**: quien llega sin sesión
+aterriza ahí, y quien ya entró pasa derecho al dashboard. Debajo del botón
+«Entrar» hay un botón secundario **«Ver la página web»** que lleva a la portada
+pública, para poder mostrar el sitio sin necesidad de una cuenta.
+
+## La portada pública (`/inicio/`)
+
+La portada es una **copia de <https://www.rastrelital.com>**: los mismos
 textos, imágenes y colores, pero maquetada a mano (el original es WordPress con
 Porto + Visual Composer + Revolution Slider). Vive en
 `tracking/templates/tracking/home.html`, es contenido fijo —no consulta el API—
@@ -111,9 +119,9 @@ y sus imágenes están descargadas en `tracking/static/tracking/site/`, así que
 depende del servidor del otro sitio.
 
 Lo único que se le agregó al diseño original: **al lado del botón azul «Inicio
-de Sesión» va un botón ámbar «DASHBOARD»** que lleva a `/dashboard/`. Sin sesión
-iniciada, el middleware lo desvía al formulario de acceso y de ahí vuelve solo
-al dashboard.
+de Sesión» va un botón ámbar «ENTRAR»** que devuelve al formulario de acceso.
+Quien ya tiene sesión iniciada no ve el formulario: el login lo manda derecho al
+dashboard.
 
 El botón azul conserva lo que hace en el sitio real: despliega las plataformas
 externas de Rastrelital (rastreo y combustible), que no son parte de este
@@ -121,8 +129,9 @@ proyecto.
 
 | Ruta | Qué es | ¿Pide sesión? |
 |---|---|---|
-| `/` | Portada pública (copia del sitio) | No |
-| `/entrar/` | Formulario de acceso | No |
+| `/` | Formulario de acceso | No |
+| `/inicio/` | Portada pública (copia del sitio) | No |
+| `/entrar/` | Dirección vieja del login: redirige a `/` | No |
 | `/dashboard/` | Dashboard de ocupación | Sí |
 | `/mapa/` | Mapa de flota en vivo | Sí (solo `admin`) |
 | `/api/dashboard/`, `/api/fleet/` | JSON de cada página | Sí |
@@ -131,8 +140,9 @@ proyecto.
 
 ## Acceso
 
-El dashboard entero (páginas y endpoints JSON) exige iniciar sesión en
-`/entrar/`. La portada es la única página que se ve sin sesión. No hay usuarios en base de datos: **el catálogo de usuarios es
+El dashboard entero (páginas y endpoints JSON) exige iniciar sesión en la raíz
+del sitio. El login y la portada son las únicas páginas que se ven sin sesión.
+No hay usuarios en base de datos: **el catálogo de usuarios es
 `DASHBOARD_USUARIOS` en `config/settings.py`**, y ahí se agregan y se quitan.
 Tras 5 intentos fallidos desde la misma IP el login se bloquea 60 segundos.
 `/admin/` conserva su propio login de Django.
@@ -238,7 +248,7 @@ tracking/
   api_client.py    cliente del WebService (token, cache, reintentos)
   services.py      lógica de negocio: servicios, timbradas, ocupación
   views.py         páginas y endpoints JSON + login + reparto por empresa
-  middleware.py    exige sesión iniciada en todo el sitio menos la portada
+  middleware.py    exige sesión iniciada en todo el sitio menos login y portada
   tests.py         pruebas (API simulado)
   templates/       portada, base, dashboard, flota y acceso
   static/tracking/site/   imágenes de la portada (copiadas del sitio)
