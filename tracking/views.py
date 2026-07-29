@@ -154,6 +154,8 @@ def dashboard(request):
     return render(request, 'tracking/dashboard.html', {
         'empresas': [{'valor': e, 'etiqueta': services.ETIQUETA_EMPRESA[e]}
                      for e in _empresas_permitidas(request)],
+        'turnos': [{'valor': t, 'etiqueta': services.ETIQUETA_TURNO[t]}
+                   for t in services.TURNOS],
         'usuario': nombre_usuario(request),
         'sesion_nueva': _sesion_nueva(request),
     })
@@ -224,7 +226,16 @@ def api_dashboard(request):
             {'error': f'Tu usuario no tiene acceso a los viajes de {empresa}.'},
             status=403,
         )
-    return _json_api(lambda: services.range_summary(desde, hasta, empresa, permitidas))
+    # El turno solo recorta lo que ya se podía ver, así que no se reparte por
+    # usuario: cualquiera que llegue hasta aquí puede pedir el que quiera.
+    turno = (request.GET.get('turno') or '').strip().upper() or None
+    if turno and turno not in services.TURNOS:
+        return JsonResponse(
+            {'error': f'Turno inválido: {turno}. Usa uno de {", ".join(services.TURNOS)}.'},
+            status=400,
+        )
+    return _json_api(
+        lambda: services.range_summary(desde, hasta, empresa, permitidas, turno))
 
 
 def api_fleet(request):

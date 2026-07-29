@@ -74,6 +74,46 @@ _PATRON_EMPRESA = (
 _RE_NOMBRE_GEOCERCA = re.compile(r'GEOCERCA\s+(.+?)\s+el\s+\d{4}/', re.IGNORECASE)
 
 
+TURNOS = ('MANANA', 'TARDE', 'NOCHE')
+
+ETIQUETA_TURNO = {
+    'MANANA': 'Mañana (4:00 – 11:59)',
+    'TARDE': 'Tarde (12:00 – 18:29)',
+    'NOCHE': 'Noche (18:30 – 3:59)',
+}
+
+# Minuto del día en que arranca cada turno. La operación los nombra «4 a 11»,
+# «12 a 6» y «6:30 a 3», que dejarían huecos entre uno y otro (11 a 12, 18:00
+# a 18:30, 3 a 4); aquí cada turno se estira hasta donde empieza el siguiente
+# para que las 24 horas queden cubiertas y los tres turnos sumen igual que
+# «Todos». El de la noche cruza la medianoche: es el que se queda con la
+# madrugada, hasta las 4.
+_INICIO_TURNO = {
+    'MANANA': 4 * 60,
+    'TARDE': 12 * 60,
+    'NOCHE': 18 * 60 + 30,
+}
+
+_RE_HORA = re.compile(r'^\s*(\d{1,2}):(\d{2})')
+
+
+def turno_de_hora(hora):
+    """Turno al que pertenece una hora 'HH:MM' o 'HH:MM:SS'.
+
+    Returns:
+        Uno de TURNOS, o None si la hora no viene con el formato esperado.
+    """
+    m = _RE_HORA.match(hora or '')
+    if not m:
+        return None
+    minutos = int(m.group(1)) % 24 * 60 + int(m.group(2))
+    if _INICIO_TURNO['MANANA'] <= minutos < _INICIO_TURNO['TARDE']:
+        return 'MANANA'
+    if _INICIO_TURNO['TARDE'] <= minutos < _INICIO_TURNO['NOCHE']:
+        return 'TARDE'
+    return 'NOCHE'
+
+
 def _nombre_geocerca(alerta):
     """Saca el nombre de la geocerca del texto de la alerta.
 
@@ -285,7 +325,7 @@ def _lista_dias(desde, hasta):
     return [(d1 + timedelta(days=n)).isoformat() for n in range((d2 - d1).days + 1)]
 
 
-def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
+def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=None):
     """Ocupación del rango: por bus, por día y de la flota entera.
 
     La ocupación de un bus es timbradas / (servicios × capacidad): pasajeros
@@ -299,6 +339,10 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
         empresa: Pestaña que se está viendo, o None para el total.
         permitidas: Techo del usuario. Aunque no pida una empresa, nunca se
             le suman viajes de una que no puede ver.
+        turno: Franja horaria que se está viendo, o None para el día entero.
+            Recorta servicios y timbradas por su hora, no por su fecha: lo que
+            el turno de la noche registra después de medianoche se cuenta en
+            el día calendario en que ocurrió, que es el siguiente.
     """
     hoy = _hoy()
     desde = desde or hoy
@@ -321,7 +365,13 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
     servicios_bus_dia = defaultdict(list)
     for d, servicios_del_dia in zip(dias_consultables, servicios_por_dia):
         for s in servicios_del_dia:
+            # El índice por bus y día se arma con los servicios de todo el día,
+            # aunque se esté viendo un turno: es lo que le pone empresa a cada
+            # timbrada, y el servicio que se la pone bien puede ser del turno
+            # de al lado.
             servicios_bus_dia[(s['equipo'], d)].append((s['hora'], s['empresa']))
+            if turno and turno_de_hora(s['hora']) != turno:
+                continue
             if filtro is None or tab_de_empresa(s['empresa']) in filtro:
                 servicios[s['equipo']] += 1
 
@@ -340,6 +390,9 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
         interno = veh.get('nombre') or veh.get('patente') or ''
         if fallo:
             unidades_con_error += 1
+
+        if turno:
+            ev_rango = [e for e in ev_rango if turno_de_hora(e['hora']) == turno]
 
         emp_por_timbrada = [
             _empresa_de_timbrada(
@@ -385,6 +438,8 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None):
         'empresa': empresa,
         'empresas': tabs,
         'etiquetas': {e: ETIQUETA_EMPRESA[e] for e in tabs},
+        'turno': turno,
+        'etiquetas_turno': dict(ETIQUETA_TURNO),
         'timbradas_inferidas': sin_empresa,
         'unidades_con_error': unidades_con_error,
         'ocupacion_flota': ocupacion_flota,

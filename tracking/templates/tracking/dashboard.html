@@ -47,6 +47,24 @@
   }
   .filtros .sep { width: 1px; height: 22px; background: var(--border); margin: 0 2px; }
 
+  .filtros.turnos { margin-top: -6px; }
+  .filtros button.turno {
+    background: none; color: var(--text-secondary);
+    border: 1px solid var(--border); font-weight: 500;
+  }
+  .filtros button.turno:hover:not(:disabled) {
+    background: var(--grid); color: var(--text-primary);
+  }
+  .filtros button.turno.activa {
+    background: var(--series-1); border-color: var(--series-1);
+    color: #fff; font-weight: 550;
+  }
+  .filtros .nota-turno {
+    flex-basis: 100%; margin-top: -4px;
+    color: var(--text-muted); font-size: 12px; display: none;
+  }
+  .filtros .nota-turno.visible { display: block; }
+
   .tile-flota {
     margin-left: auto; padding: 8px 18px; text-align: right;
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
@@ -136,6 +154,20 @@
   </div>
 </div>
 
+<div class="filtros turnos" id="tabs-turno">
+  <label>Turno</label>
+  <button class="turno activa" data-turno="">Todo el día</button>
+  {% for t in turnos %}
+  <button class="turno" data-turno="{{ t.valor }}">{{ t.etiqueta }}</button>
+  {% endfor %}
+  <span class="nota-turno" id="nota-turno">
+    El turno de la noche cruza la medianoche: lo que se registra entre las 0:00
+    y las 3:59 se cuenta en el día calendario en que ocurrió, o sea el
+    siguiente. En «Detalle timbradas por día» esas timbradas aparecen en la
+    fila del día de después, no en la del día en que arrancó el turno.
+  </span>
+</div>
+
 <div class="nota-carga" id="nota-carga"></div>
 
 <div class="grid-2">
@@ -187,12 +219,15 @@
   const inputHasta = document.getElementById('hasta');
   const btn = document.getElementById('btn-consultar');
   const tabs = document.getElementById('tabs-empresa');
+  const tabsTurno = document.getElementById('tabs-turno');
   const notaVacia = document.getElementById('nota-vacia');
   const notaCarga = document.getElementById('nota-carga');
+  const notaTurno = document.getElementById('nota-turno');
   const botonesRango = document.querySelectorAll('.filtros button.rango');
   const contenedoresViz = document.querySelectorAll('.viz');
   let datos = null;
   let empresa = '';
+  let turno = '';
   let cargando = false;
 
   const ddmmaaaa = (f) => f.split('-').reverse().join('/');
@@ -355,9 +390,18 @@
     const totalServicios = datos.vehiculos.reduce((a, v) => a + v.servicios, 0);
     const totalTimbradas = datos.vehiculos.reduce((a, v) => a + v.timbradas, 0);
     const inferidas = datos.timbradas_inferidas || 0;
+    const etiquetaTurno = (datos.etiquetas_turno || {})[datos.turno] || '';
     let msg = '';
 
-    if (datos.empresa === 'SIN-IDENTIFICAR') {
+    if (datos.turno && totalServicios === 0 && totalTimbradas > 0) {
+      msg = `<b>Hay timbradas en el turno de ${etiquetaTurno.toLowerCase()}, pero ningún servicio.</b> ` +
+            `Subieron ${fmt(totalTimbradas)} pasajeros dentro de esa franja, y aun así ` +
+            `ningún bus registró entrada a una geocerca${datos.empresa ? ' de ' + etiqueta : ''} ` +
+            `en ese horario. La ocupación se calcula timbradas ÷ servicios ÷ capacidad, ` +
+            `así que sin servicios no hay con qué dividir: «Ocupación real» y ` +
+            `«Capacidad total» se quedan vacías y el promedio de la flota queda en «—». ` +
+            `Los conteos de «Total Timbradas» sí son reales.`;
+    } else if (datos.empresa === 'SIN-IDENTIFICAR') {
       msg = `<b>Esto es una deducción, no una medición.</b> Aquí cae todo lo que ` +
             `no se pudo atribuir a una empresa: ${fmt(totalTimbradas)} timbradas de ` +
             `buses que ese día no registraron entrada a ninguna geocerca con nombre ` +
@@ -510,6 +554,7 @@
     inputHasta.disabled = ocupado;
     btn.disabled = ocupado || !fechasListas();
     tabs.querySelectorAll('button').forEach(b => { b.disabled = ocupado; });
+    tabsTurno.querySelectorAll('button').forEach(b => { b.disabled = ocupado; });
     botonesRango.forEach(b => { b.disabled = ocupado; });
   }
 
@@ -534,7 +579,8 @@
     try {
       const url = '{% url "tracking:api_dashboard" %}' +
         '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value +
-        '&empresa=' + encodeURIComponent(empresa);
+        '&empresa=' + encodeURIComponent(empresa) +
+        '&turno=' + encodeURIComponent(turno);
 
       let data = null;
       for (let intento = 1; intento <= REINTENTOS; intento++) {
@@ -567,6 +613,7 @@
       pintarTodo();
       document.getElementById('estado').textContent =
         ((data.etiquetas || {})[data.empresa] || 'Todas las empresas') + ' · ' +
+        ((data.etiquetas_turno || {})[data.turno] || 'Todo el día') + ' · ' +
         ddmmaaaa(data.desde) + ' – ' + ddmmaaaa(data.hasta) +
         ' · actualizado ' + new Date().toLocaleTimeString('es-CO');
     } catch (e) {
@@ -585,6 +632,15 @@
     if (!b || b.dataset.empresa === empresa) return;
     empresa = b.dataset.empresa;
     tabs.querySelectorAll('button').forEach(x => x.classList.toggle('activa', x === b));
+    if (fechasListas()) cargar();
+  });
+
+  tabsTurno.addEventListener('click', (ev) => {
+    const b = ev.target.closest('button');
+    if (!b || b.dataset.turno === turno) return;
+    turno = b.dataset.turno;
+    tabsTurno.querySelectorAll('button').forEach(x => x.classList.toggle('activa', x === b));
+    notaTurno.classList.toggle('visible', turno === 'NOCHE');
     if (fechasListas()) cargar();
   });
 
