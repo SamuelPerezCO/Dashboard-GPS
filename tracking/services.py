@@ -97,21 +97,83 @@ _INICIO_TURNO = {
 _RE_HORA = re.compile(r'^\s*(\d{1,2}):(\d{2})')
 
 
+def minutos_de_hora(hora):
+    """Minuto del día de una hora 'HH:MM' o 'HH:MM:SS'.
+
+    Returns:
+        El minuto (0–1439), o None si la hora no viene con el formato esperado.
+    """
+    m = _RE_HORA.match(hora or '')
+    if not m:
+        return None
+    return int(m.group(1)) % 24 * 60 + int(m.group(2))
+
+
 def turno_de_hora(hora):
     """Turno al que pertenece una hora 'HH:MM' o 'HH:MM:SS'.
 
     Returns:
         Uno de TURNOS, o None si la hora no viene con el formato esperado.
     """
-    m = _RE_HORA.match(hora or '')
-    if not m:
+    minutos = minutos_de_hora(hora)
+    if minutos is None:
         return None
-    minutos = int(m.group(1)) % 24 * 60 + int(m.group(2))
     if _INICIO_TURNO['MANANA'] <= minutos < _INICIO_TURNO['TARDE']:
         return 'MANANA'
     if _INICIO_TURNO['TARDE'] <= minutos < _INICIO_TURNO['NOCHE']:
         return 'TARDE'
     return 'NOCHE'
+
+
+def franja_de_turno(turno):
+    """Franja (minuto de inicio, minuto de fin) de un turno.
+
+    El fin es abierto y puede ser menor que el inicio: así queda la noche,
+    que cruza la medianoche.
+
+    Returns:
+        La pareja de minutos, o None si el turno no existe.
+    """
+    if turno not in TURNOS:
+        return None
+    siguiente = TURNOS[(TURNOS.index(turno) + 1) % len(TURNOS)]
+    return (_INICIO_TURNO[turno], _INICIO_TURNO[siguiente])
+
+
+def en_franja(hora, franja):
+    """Dice si una hora cae dentro de la franja.
+
+    Args:
+        hora: 'HH:MM' o 'HH:MM:SS'.
+        franja: (inicio, fin) en minutos del día, con el fin abierto. Si el
+            fin no es mayor que el inicio, la franja cruza la medianoche y se
+            lee como «del inicio a la medianoche, más de la medianoche al fin».
+
+    Returns:
+        False también cuando la hora no trae el formato esperado: sin hora no
+        hay manera de saber si entra, y contarla sería inflar la franja.
+    """
+    if not franja:
+        return True
+    minutos = minutos_de_hora(hora)
+    if minutos is None:
+        return False
+    ini, fin = franja
+    if ini < fin:
+        return ini <= minutos < fin
+    return minutos >= ini or minutos < fin
+
+
+def _hhmm(minutos):
+    """Los minutos del día de vuelta como 'HH:MM'."""
+    return f'{minutos // 60 % 24:02d}:{minutos % 60:02d}'
+
+
+def etiqueta_de_franja(franja):
+    """Nombre de una franja para mostrar, p. ej. «Horas 04:00 – 11:59»."""
+    ini, fin = franja
+    # El fin es abierto, así que se muestra el último minuto que sí entra.
+    return f'Horas {_hhmm(ini)} – {_hhmm(fin - 1)}'
 
 
 def _nombre_geocerca(alerta):
@@ -325,7 +387,8 @@ def _lista_dias(desde, hasta):
     return [(d1 + timedelta(days=n)).isoformat() for n in range((d2 - d1).days + 1)]
 
 
-def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=None):
+def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=None,
+                  franja=None):
     """Ocupación del rango: por bus, por día y de la flota entera.
 
     La ocupación de un bus es timbradas / (servicios × capacidad): pasajeros
@@ -339,12 +402,18 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
         empresa: Pestaña que se está viendo, o None para el total.
         permitidas: Techo del usuario. Aunque no pida una empresa, nunca se
             le suman viajes de una que no puede ver.
-        turno: Franja horaria que se está viendo, o None para el día entero.
-            Recorta servicios y timbradas por su hora, no por su fecha: lo que
-            el turno de la noche registra después de medianoche se cuenta en
-            el día calendario en que ocurrió, que es el siguiente.
+        turno: Turno que se está viendo, o None para el día entero. Recorta
+            servicios y timbradas por su hora, no por su fecha: lo que el turno
+            de la noche registra después de medianoche se cuenta en el día
+            calendario en que ocurrió, que es el siguiente.
+        franja: (inicio, fin) en minutos del día para recortar por horas a
+            mano, en vez de por turno. Si viene, manda sobre `turno`.
     """
     hoy = _hoy()
+    if franja:
+        turno = None
+    else:
+        franja = franja_de_turno(turno)
     desde = desde or hoy
     hasta = hasta or hoy
     if desde > hasta:
@@ -370,7 +439,7 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
             # timbrada, y el servicio que se la pone bien puede ser del turno
             # de al lado.
             servicios_bus_dia[(s['equipo'], d)].append((s['hora'], s['empresa']))
-            if turno and turno_de_hora(s['hora']) != turno:
+            if franja and not en_franja(s['hora'], franja):
                 continue
             if filtro is None or tab_de_empresa(s['empresa']) in filtro:
                 servicios[s['equipo']] += 1
@@ -391,8 +460,8 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
         if fallo:
             unidades_con_error += 1
 
-        if turno:
-            ev_rango = [e for e in ev_rango if turno_de_hora(e['hora']) == turno]
+        if franja:
+            ev_rango = [e for e in ev_rango if en_franja(e['hora'], franja)]
 
         emp_por_timbrada = [
             _empresa_de_timbrada(
@@ -440,6 +509,8 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
         'etiquetas': {e: ETIQUETA_EMPRESA[e] for e in tabs},
         'turno': turno,
         'etiquetas_turno': dict(ETIQUETA_TURNO),
+        'franja': list(franja) if franja and not turno else None,
+        'etiqueta_franja': etiqueta_de_franja(franja) if franja and not turno else None,
         'timbradas_inferidas': sin_empresa,
         'unidades_con_error': unidades_con_error,
         'ocupacion_flota': ocupacion_flota,

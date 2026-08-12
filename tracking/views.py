@@ -20,6 +20,7 @@ from .middleware import (CLAVE_LOGIN_NUEVO, CLAVE_SESION, CLAVE_USUARIO,
 logger = logging.getLogger(__name__)
 
 FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+HORA_RE = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
 
 MAX_INTENTOS = 5
 BLOQUEO_SEGUNDOS = 60
@@ -202,6 +203,33 @@ def _json_api(build):
         )
 
 
+def _franja_pedida(request):
+    """Franja de horas a mano que trae la URL, en minutos del día.
+
+    Las dos horas van juntas: con una sola no se sabe qué se está pidiendo.
+    El fin es abierto y se corre un minuto, porque en la pantalla se elige la
+    última hora que sí se quiere ver («de 04:00 a 11:59» son esas dos incluidas).
+
+    Returns:
+        La pareja (inicio, fin), o None si la URL no pide horas.
+
+    Raises:
+        ValueError: Si las horas no son 'HH:MM' o viene solo una.
+    """
+    crudas = [(request.GET.get(clave) or '').strip()
+              for clave in ('hora_desde', 'hora_hasta')]
+    if not any(crudas):
+        return None
+    if not all(crudas):
+        raise ValueError('Para filtrar por horas manda hora_desde y hora_hasta, '
+                         'las dos en formato HH:MM.')
+    for h in crudas:
+        if not HORA_RE.match(h):
+            raise ValueError(f'Hora inválida: {h}. Usa HH:MM entre 00:00 y 23:59.')
+    ini, fin = (services.minutos_de_hora(h) for h in crudas)
+    return (ini, (fin + 1) % (24 * 60))
+
+
 def api_dashboard(request):
     """JSON del dashboard para un rango de fechas.
 
@@ -234,8 +262,13 @@ def api_dashboard(request):
             {'error': f'Turno inválido: {turno}. Usa uno de {", ".join(services.TURNOS)}.'},
             status=400,
         )
+    try:
+        franja = _franja_pedida(request)
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
     return _json_api(
-        lambda: services.range_summary(desde, hasta, empresa, permitidas, turno))
+        lambda: services.range_summary(desde, hasta, empresa, permitidas, turno,
+                                       franja))
 
 
 def api_fleet(request):

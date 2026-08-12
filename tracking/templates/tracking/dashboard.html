@@ -26,39 +26,31 @@
 
   .filtros { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
   .filtros label { color: var(--text-secondary); font-size: 13px; }
-  .filtros input[type=date] {
+  .filtros input[type=date],
+  .filtros input[type=time],
+  .filtros input[type=number],
+  .filtros select {
     background: var(--surface-1); color: var(--text-primary);
     border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
     font: inherit;
   }
-  .filtros input[type=date]:disabled { opacity: 0.6; cursor: wait; }
+  .filtros select { cursor: pointer; padding-right: 6px; }
+  .filtros select:hover:not(:disabled) { background: var(--grid); }
+  .filtros input[type=number] { width: 76px; }
+  .filtros input:disabled, .filtros select:disabled { opacity: 0.6; cursor: wait; }
   .filtros button {
     background: var(--series-1); color: #fff; border: none; border-radius: 6px;
     padding: 7px 14px; font: inherit; font-weight: 550; cursor: pointer;
   }
   .filtros button:disabled { opacity: 0.6; cursor: wait; }
 
-  .filtros button.rango {
-    background: none; color: var(--text-secondary);
-    border: 1px solid var(--border); font-weight: 500;
-  }
-  .filtros button.rango:hover:not(:disabled) {
-    background: var(--grid); color: var(--text-primary);
-  }
   .filtros .sep { width: 1px; height: 22px; background: var(--border); margin: 0 2px; }
 
+  /* Los campos de «personalizado» solo aparecen cuando su select los pide. */
+  .filtros .personalizado { display: none; align-items: center; gap: 6px; }
+  .filtros .personalizado.visible { display: flex; }
+
   .filtros.turnos { margin-top: -6px; }
-  .filtros button.turno {
-    background: none; color: var(--text-secondary);
-    border: 1px solid var(--border); font-weight: 500;
-  }
-  .filtros button.turno:hover:not(:disabled) {
-    background: var(--grid); color: var(--text-primary);
-  }
-  .filtros button.turno.activa {
-    background: var(--series-1); border-color: var(--series-1);
-    color: #fff; font-weight: 550;
-  }
   .filtros .nota-turno {
     flex-basis: 100%; margin-top: -4px;
     color: var(--text-muted); font-size: 12px; display: none;
@@ -144,8 +136,18 @@
   <input type="date" id="hasta">
   <button id="btn-consultar" disabled>Consultar</button>
   <span class="sep"></span>
-  <button class="rango" data-dias="7">Última semana</button>
-  <button class="rango" data-dias="30">Último mes</button>
+  <label for="sel-rango">Rango</label>
+  <select id="sel-rango">
+    <option value="">Elegido a mano</option>
+    <option value="7">Última semana</option>
+    <option value="30">Último mes</option>
+    <option value="custom">Días personalizados…</option>
+  </select>
+  <span class="personalizado" id="rango-custom">
+    <label for="dias-custom">últimos</label>
+    <input type="number" id="dias-custom" min="1" max="366" step="1" value="15">
+    <label for="dias-custom">días</label>
+  </span>
 
   <div class="tile-flota">
     <div class="label">Ocupación flota total</div>
@@ -155,16 +157,25 @@
 </div>
 
 <div class="filtros turnos" id="tabs-turno">
-  <label>Turno</label>
-  <button class="turno activa" data-turno="">Todo el día</button>
-  {% for t in turnos %}
-  <button class="turno" data-turno="{{ t.valor }}">{{ t.etiqueta }}</button>
-  {% endfor %}
+  <label for="sel-turno">Turno</label>
+  <select id="sel-turno">
+    <option value="" selected>Todo el día</option>
+    {% for t in turnos %}
+    <option value="{{ t.valor }}" data-turno="{{ t.valor }}">{{ t.etiqueta }}</option>
+    {% endfor %}
+    <option value="custom">Horas personalizadas…</option>
+  </select>
+  <span class="personalizado" id="turno-custom">
+    <label for="hora-desde">de</label>
+    <input type="time" id="hora-desde" value="04:00">
+    <label for="hora-hasta">a</label>
+    <input type="time" id="hora-hasta" value="11:59">
+  </span>
   <span class="nota-turno" id="nota-turno">
-    El turno de la noche cruza la medianoche: lo que se registra entre las 0:00
-    y las 3:59 se cuenta en el día calendario en que ocurrió, o sea el
-    siguiente. En «Detalle timbradas por día» esas timbradas aparecen en la
-    fila del día de después, no en la del día en que arrancó el turno.
+    Esta franja cruza la medianoche: lo que se registra después de las 0:00 se
+    cuenta en el día calendario en que ocurrió, o sea el siguiente. En «Detalle
+    timbradas por día» esas timbradas aparecen en la fila del día de después,
+    no en la del día en que arrancó la franja.
   </span>
 </div>
 
@@ -219,11 +230,16 @@
   const inputHasta = document.getElementById('hasta');
   const btn = document.getElementById('btn-consultar');
   const tabs = document.getElementById('tabs-empresa');
-  const tabsTurno = document.getElementById('tabs-turno');
   const notaVacia = document.getElementById('nota-vacia');
   const notaCarga = document.getElementById('nota-carga');
   const notaTurno = document.getElementById('nota-turno');
-  const botonesRango = document.querySelectorAll('.filtros button.rango');
+  const selRango = document.getElementById('sel-rango');
+  const diasCustom = document.getElementById('dias-custom');
+  const cajaRangoCustom = document.getElementById('rango-custom');
+  const selTurno = document.getElementById('sel-turno');
+  const horaDesde = document.getElementById('hora-desde');
+  const horaHasta = document.getElementById('hora-hasta');
+  const cajaTurnoCustom = document.getElementById('turno-custom');
   const contenedoresViz = document.querySelectorAll('.viz');
   let datos = null;
   let empresa = '';
@@ -554,8 +570,8 @@
     inputHasta.disabled = ocupado;
     btn.disabled = ocupado || !fechasListas();
     tabs.querySelectorAll('button').forEach(b => { b.disabled = ocupado; });
-    tabsTurno.querySelectorAll('button').forEach(b => { b.disabled = ocupado; });
-    botonesRango.forEach(b => { b.disabled = ocupado; });
+    [selRango, diasCustom, selTurno, horaDesde, horaHasta]
+      .forEach(c => { c.disabled = ocupado; });
   }
 
   async function cargar() {
@@ -580,7 +596,11 @@
       const url = '{% url "tracking:api_dashboard" %}' +
         '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value +
         '&empresa=' + encodeURIComponent(empresa) +
-        '&turno=' + encodeURIComponent(turno);
+        '&turno=' + encodeURIComponent(turnoPersonalizado() ? '' : turno) +
+        (turnoPersonalizado()
+          ? '&hora_desde=' + encodeURIComponent(horaDesde.value) +
+            '&hora_hasta=' + encodeURIComponent(horaHasta.value)
+          : '');
 
       let data = null;
       for (let intento = 1; intento <= REINTENTOS; intento++) {
@@ -613,7 +633,8 @@
       pintarTodo();
       document.getElementById('estado').textContent =
         ((data.etiquetas || {})[data.empresa] || 'Todas las empresas') + ' · ' +
-        ((data.etiquetas_turno || {})[data.turno] || 'Todo el día') + ' · ' +
+        (data.etiqueta_franja ||
+         (data.etiquetas_turno || {})[data.turno] || 'Todo el día') + ' · ' +
         ddmmaaaa(data.desde) + ' – ' + ddmmaaaa(data.hasta) +
         ' · actualizado ' + new Date().toLocaleTimeString('es-CO');
     } catch (e) {
@@ -635,16 +656,38 @@
     if (fechasListas()) cargar();
   });
 
-  tabsTurno.addEventListener('click', (ev) => {
-    const b = ev.target.closest('button');
-    if (!b || b.dataset.turno === turno) return;
-    turno = b.dataset.turno;
-    tabsTurno.querySelectorAll('button').forEach(x => x.classList.toggle('activa', x === b));
-    notaTurno.classList.toggle('visible', turno === 'NOCHE');
+  const turnoPersonalizado = () => turno === 'custom';
+
+  // La franja que cruza la medianoche se cuenta en el día en que ocurrió cada
+  // timbrada, así que hay que avisarlo: pasa con la noche y con cualquier hora
+  // personalizada que termine antes de la que empieza.
+  function refrescarNotaTurno() {
+    const cruza = turnoPersonalizado()
+      ? Boolean(horaDesde.value && horaHasta.value && horaHasta.value <= horaDesde.value)
+      : turno === 'NOCHE';
+    notaTurno.classList.toggle('visible', cruza);
+  }
+
+  function aplicarTurno() {
+    turno = selTurno.value;
+    cajaTurnoCustom.classList.toggle('visible', turnoPersonalizado());
+    refrescarNotaTurno();
+    if (turnoPersonalizado() && !(horaDesde.value && horaHasta.value)) return;
     if (fechasListas()) cargar();
-  });
+  }
+
+  selTurno.addEventListener('change', aplicarTurno);
+
+  [horaDesde, horaHasta].forEach(input => input.addEventListener('change', () => {
+    if (!turnoPersonalizado()) return;
+    refrescarNotaTurno();
+    if (horaDesde.value && horaHasta.value && fechasListas()) cargar();
+  }));
 
   [inputDesde, inputHasta].forEach(input => input.addEventListener('change', () => {
+    // Tocar las fechas a mano deja de ser cualquiera de los rangos del select.
+    selRango.value = '';
+    cajaRangoCustom.classList.remove('visible');
     btn.disabled = !fechasListas();
     if (fechasListas()) cargar();
     else if (!datos) estadoSinFechas();
@@ -652,14 +695,33 @@
 
   [inputDesde, inputHasta].forEach(input => input.addEventListener('focus', fijarTopeHoy));
 
-  botonesRango.forEach(b => b.addEventListener('click', () => {
-    const dias = +b.dataset.dias;
+  const DIAS_MAX = 366;
+
+  function ponerUltimosDias(dias) {
     const fin = new Date();
     const ini = new Date(fin); ini.setDate(fin.getDate() - (dias - 1));
     inputHasta.value = fin.toLocaleDateString('sv-SE');
     inputDesde.value = ini.toLocaleDateString('sv-SE');
+    btn.disabled = false;
     cargar();
-  }));
+  }
+
+  function aplicarDiasCustom() {
+    const dias = Math.min(DIAS_MAX, Math.max(1, Math.round(+diasCustom.value || 0)));
+    diasCustom.value = dias;
+    ponerUltimosDias(dias);
+  }
+
+  selRango.addEventListener('change', () => {
+    const custom = selRango.value === 'custom';
+    cajaRangoCustom.classList.toggle('visible', custom);
+    if (custom) { aplicarDiasCustom(); return; }
+    if (selRango.value) ponerUltimosDias(+selRango.value);
+  });
+
+  diasCustom.addEventListener('change', () => {
+    if (selRango.value === 'custom') aplicarDiasCustom();
+  });
 
   btn.addEventListener('click', cargar);
 

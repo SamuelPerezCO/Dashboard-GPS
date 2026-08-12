@@ -158,6 +158,38 @@ class NormalizarInternoTests(TestCase):
             services.CAPACIDAD_POR_INTERNO[services._norm_interno('INT 7076')], 31)
 
 
+class FranjaDeHorasTests(TestCase):
+    """Las franjas de horas, las de los turnos y las escritas a mano."""
+
+    def test_la_franja_del_turno_llega_hasta_el_siguiente(self):
+        self.assertEqual(services.franja_de_turno('MANANA'), (4 * 60, 12 * 60))
+        self.assertEqual(services.franja_de_turno('TARDE'), (12 * 60, 18 * 60 + 30))
+        self.assertEqual(services.franja_de_turno('NOCHE'), (18 * 60 + 30, 4 * 60))
+        self.assertIsNone(services.franja_de_turno(None))
+
+    def test_la_franja_normal_incluye_el_inicio_y_no_el_fin(self):
+        franja = (8 * 60, 10 * 60)
+        self.assertTrue(services.en_franja('08:00:00', franja))
+        self.assertTrue(services.en_franja('09:59', franja))
+        self.assertFalse(services.en_franja('10:00', franja))
+        self.assertFalse(services.en_franja('07:59', franja))
+
+    def test_la_franja_que_cruza_medianoche_se_parte_en_dos(self):
+        franja = (22 * 60, 2 * 60)
+        for hora in ('22:00', '23:59', '00:00', '01:59'):
+            self.assertTrue(services.en_franja(hora, franja), hora)
+        for hora in ('21:59', '02:00', '12:00'):
+            self.assertFalse(services.en_franja(hora, franja), hora)
+
+    def test_sin_franja_entra_todo_y_sin_hora_no_entra_nada(self):
+        self.assertTrue(services.en_franja('cualquier cosa', None))
+        self.assertFalse(services.en_franja('', (0, 60)))
+
+    def test_la_etiqueta_muestra_la_ultima_hora_que_entra(self):
+        self.assertEqual(services.etiqueta_de_franja((4 * 60, 12 * 60)),
+                         'Horas 04:00 – 11:59')
+
+
 @patch.object(services.api_client, 'get_alerts')
 @patch.object(services.api_client, 'get_vehicles')
 @patch.object(services.api_client, 'get_passenger_events')
@@ -286,6 +318,37 @@ class RangeSummaryTests(TestCase):
         eventos.return_value = []
         r = services.range_summary('2026-07-25', '2026-07-20')
         self.assertEqual((r['desde'], r['hasta']), ('2026-07-20', '2026-07-25'))
+
+    def test_la_franja_a_mano_recorta_servicios_y_timbradas(
+            self, eventos, vehiculos, alertas):
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
+                                _alerta('100', '14:00:00', 'PROCAPS')]
+        eventos.side_effect = lambda equipo, *a, **k: [
+            {'fecha': '2026-07-20', 'hora': '08:30:00', 'pasajero': 'a'},
+            {'fecha': '2026-07-20', 'hora': '14:30:00', 'pasajero': 'b'},
+        ]
+
+        r = services.range_summary('2026-07-20', '2026-07-20',
+                                   franja=(8 * 60, 9 * 60))
+
+        bus = r['vehiculos'][0]
+        self.assertEqual((bus['servicios'], bus['timbradas']), (1, 1))
+        self.assertIsNone(r['turno'])
+        self.assertEqual(r['franja'], [480, 540])
+        self.assertEqual(r['etiqueta_franja'], 'Horas 08:00 – 08:59')
+
+    def test_la_franja_a_mano_le_gana_al_turno(self, eventos, vehiculos, alertas):
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = [_alerta('100', '14:00:00', 'PROCAPS')]
+        eventos.side_effect = lambda equipo, *a, **k: [
+            {'fecha': '2026-07-20', 'hora': '14:30:00', 'pasajero': 'a'}]
+
+        r = services.range_summary('2026-07-20', '2026-07-20', turno='MANANA',
+                                   franja=(12 * 60, 18 * 60))
+
+        self.assertEqual(r['vehiculos'][0]['timbradas'], 1)
+        self.assertIsNone(r['turno'])
 
     def test_el_detalle_trae_una_fila_por_dia(self, eventos, vehiculos, alertas):
         vehiculos.return_value = self.VEHICULOS[:1]
@@ -546,7 +609,7 @@ class AccesoPorEmpresaTests(TestCase):
                             {'desde': '2026-07-20', 'hasta': '2026-07-20'})
         resumen.assert_called_once_with(
             '2026-07-20', '2026-07-20', None,
-            ['DITAR', services.TAB_SIN_IDENTIFICAR])
+            ['DITAR', services.TAB_SIN_IDENTIFICAR], None, None)
 
     def test_el_mapa_de_flota_es_solo_del_admin(self):
         self.entrar('relianz', 'relianz')
@@ -651,6 +714,38 @@ class DashboardTests(TestCase):
         r = self.client.get(reverse('tracking:api_dashboard'), {'empresa': 'INVENTADA'})
         self.assertEqual(r.status_code, 400)
         self.assertIn('RELIANZ', r.json()['error'])
+
+    def test_dibuja_los_selects_de_rango_y_de_turno(self):
+        r = self.client.get(reverse('tracking:dashboard'))
+        self.assertContains(r, 'id="sel-rango"')
+        self.assertContains(r, 'id="sel-turno"')
+        self.assertContains(r, 'id="dias-custom"')
+        self.assertContains(r, 'id="hora-desde"')
+        for valor in services.TURNOS:
+            self.assertContains(r, f'data-turno="{valor}"')
+
+    def test_las_horas_a_mano_llegan_a_services_en_minutos(self):
+        with patch.object(services, 'range_summary', return_value={}) as resumen:
+            r = self.client.get(reverse('tracking:api_dashboard'),
+                                {'hora_desde': '06:30', 'hora_hasta': '09:00'})
+        self.assertEqual(r.status_code, 200)
+        # El fin se corre un minuto: 09:00 se elige para verla, y la franja lo
+        # tiene abierto.
+        self.assertEqual(resumen.call_args.args[5], (6 * 60 + 30, 9 * 60 + 1))
+
+    def test_las_horas_del_dia_entero_dan_la_vuelta_al_reloj(self):
+        with patch.object(services, 'range_summary', return_value={}) as resumen:
+            self.client.get(reverse('tracking:api_dashboard'),
+                            {'hora_desde': '00:00', 'hora_hasta': '23:59'})
+        self.assertEqual(resumen.call_args.args[5], (0, 0))
+
+    def test_rechaza_una_hora_invalida_o_a_medias(self):
+        for params in ({'hora_desde': '25:00', 'hora_hasta': '09:00'},
+                       {'hora_desde': '6:3', 'hora_hasta': '09:00'},
+                       {'hora_desde': '06:30'}):
+            r = self.client.get(reverse('tracking:api_dashboard'), params)
+            self.assertEqual(r.status_code, 400, params)
+            self.assertIn('HH:MM', r.json()['error'])
 
     @patch.object(services.api_client, 'get_vehicles')
     def test_un_fallo_del_api_responde_502_y_no_revienta(self, vehiculos):
