@@ -27,6 +27,7 @@ De ahí sale todo el modelo:
 | **Empresa** | Nombre de la geocerca (`PROCAPS`, `DITAR`, `RELIANZ`). |
 | **Timbrada** (un pasajero) | Evento `2720` del historial, con el `iButton_ID`. |
 | **Capacidad** | Tabla fija por interno en `services.py` (lista física de la flota). |
+| **Tipo de vehículo** | La misma tabla: buseta, busetón o bus. Filtra la flota entera, no los viajes. |
 
 La ocupación de un bus es:
 

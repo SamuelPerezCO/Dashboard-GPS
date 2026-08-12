@@ -41,17 +41,68 @@ def _norm_interno(interno):
     return ''.join((interno or '').upper().split())
 
 
-_CAPACIDAD_CRUDA = {
-    'INT 7074': 25, 'INT 7075': 25, 'INT 7076': 31, 'INT 7077': 37,
-    'INT 7078': 37, 'INT 7079': 37, 'INT 7080': 37, 'INT 7088': 30,
-    'INT 7091': 30, 'INT 7092': 30, 'INT 7093': 30, 'INT 7094': 30,
-    'INT 7095': 30, 'INT 7097': 30, 'INT 7099': 30, 'INT 7202': 30,
-    'INT 7203': 30, 'INT 7204': 30, 'INT 7227': 40, 'INT 7239': 40,
-    'INT 7245': 40, 'INT 7248': 40, 'INT 7250': 40, 'INT 7269': 40,
-    'INT 7273': 40, 'INT 7274': 40, 'INT 7275': 40, 'INT 7276': 40,
-    'INT 7277': 40, 'INT 7278': 40,
+TIPOS = ('BUSETA', 'BUSETON', 'BUS')
+
+ETIQUETA_TIPO = {
+    'BUSETA': 'Buseta',
+    'BUSETON': 'Busetón',
+    'BUS': 'Bus',
 }
-CAPACIDAD_POR_INTERNO = {_norm_interno(k): v for k, v in _CAPACIDAD_CRUDA.items()}
+
+# Tipo de vehículo y sillas de cada interno, como los tiene la planilla de
+# flota. El API no manda ninguna de las dos cosas, así que esta tabla es la
+# única fuente: de aquí salen la ocupación y el filtro por tipo.
+_FLOTA_CRUDA = {
+    'INT 7074': ('BUSETA', 25),
+    'INT 7075': ('BUSETA', 25),
+    'INT 7076': ('BUSETA', 30),
+    'INT 7077': ('BUSETON', 37),
+    'INT 7078': ('BUSETON', 37),
+    'INT 7079': ('BUSETON', 37),
+    'INT 7080': ('BUSETON', 37),
+    'INT 7081': ('BUSETA', 30),
+    'INT 7088': ('BUSETA', 30),
+    'INT 7091': ('BUSETA', 30),
+    'INT 7092': ('BUSETA', 30),
+    'INT 7093': ('BUSETA', 30),
+    'INT 7094': ('BUSETA', 30),
+    'INT 7097': ('BUSETA', 30),
+    'INT 7099': ('BUSETA', 30),
+    'INT 7202': ('BUSETA', 30),
+    'INT 7204': ('BUSETA', 30),
+    'INT 7227': ('BUS', 40),
+    'INT 7245': ('BUS', 40),
+    'INT 7248': ('BUS', 40),
+    'INT 7269': ('BUS', 40),
+    'INT 7273': ('BUS', 41),
+    'INT 7274': ('BUS', 41),
+    'INT 7275': ('BUS', 41),
+    'INT 7276': ('BUS', 41),
+    'INT 7277': ('BUS', 41),
+    'INT 7278': ('BUS', 41),
+    'INT 7283': ('BUS', 40),
+    'INT 7284': ('BUS', 40),
+    'INT 7304': ('BUS', 40),
+    'INT 7305': ('BUS', 40),
+    'INT 7306': ('BUS', 40),
+    'INT 7307': ('BUSETON', 39),
+    'INT 7308': ('BUSETON', 39),
+    'INT 7309': ('BUSETON', 39),
+    'INT 7324': ('BUSETA', 30),
+    'INT 7325': ('BUSETA', 30),
+    'INT 7326': ('BUSETA', 30),
+    'INT 7327': ('BUSETA', 30),
+    # Estos cuatro ya no están en la planilla pero el API los sigue
+    # devolviendo: se quedan con la capacidad que tenían y sin tipo, así que
+    # siguen contando en la ocupación y no entran en ningún filtro por tipo.
+    'INT 7095': (None, 30),
+    'INT 7203': (None, 30),
+    'INT 7239': (None, 40),
+    'INT 7250': (None, 40),
+}
+CAPACIDAD_POR_INTERNO = {_norm_interno(k): cap for k, (_, cap) in _FLOTA_CRUDA.items()}
+TIPO_POR_INTERNO = {_norm_interno(k): tipo
+                    for k, (tipo, _) in _FLOTA_CRUDA.items() if tipo}
 
 
 TAB_SIN_IDENTIFICAR = 'SIN-IDENTIFICAR'
@@ -388,7 +439,7 @@ def _lista_dias(desde, hasta):
 
 
 def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=None,
-                  franja=None):
+                  franja=None, tipo=None):
     """Ocupación del rango: por bus, por día y de la flota entera.
 
     La ocupación de un bus es timbradas / (servicios × capacidad): pasajeros
@@ -408,6 +459,9 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
             calendario en que ocurrió, que es el siguiente.
         franja: (inicio, fin) en minutos del día para recortar por horas a
             mano, en vez de por turno. Si viene, manda sobre `turno`.
+        tipo: Tipo de vehículo (uno de TIPOS), o None para toda la flota. Deja
+            fuera los buses de otro tipo, no sus viajes: el bus entero
+            desaparece de las gráficas y del detalle.
     """
     hoy = _hoy()
     if franja:
@@ -422,6 +476,12 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
     filtro = _filtro_de_tabs(empresa, permitidas)
 
     vehicles = api_client.get_vehicles()
+    if tipo:
+        # Se recorta antes de pedir timbradas: cada bus que sale de la lista
+        # es una consulta menos al API.
+        vehicles = [v for v in vehicles
+                    if TIPO_POR_INTERNO.get(
+                        _norm_interno(v.get('nombre') or v.get('patente') or '')) == tipo]
     primer_dia_mes = hoy[:8] + '01'
     hasta_efectivo = min(hasta, hoy)
     rango_dentro_del_mes = desde >= primer_dia_mes
@@ -475,7 +535,8 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
 
         timbradas = len(ev_rango)
         n_servicios = servicios.get(str(equipo), 0)
-        capacidad = CAPACIDAD_POR_INTERNO.get(_norm_interno(interno))
+        clave_interno = _norm_interno(interno)
+        capacidad = CAPACIDAD_POR_INTERNO.get(clave_interno)
         if capacidad and n_servicios:
             ocupacion = round(timbradas / (n_servicios * capacidad) * 100, 2)
         else:
@@ -484,6 +545,7 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
         vehiculos.append({
             'interno': interno,
             'equipo': equipo,
+            'tipo': TIPO_POR_INTERNO.get(clave_interno),
             'servicios': n_servicios,
             'timbradas': timbradas,
             'capacidad': capacidad,
@@ -509,6 +571,9 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
         'etiquetas': {e: ETIQUETA_EMPRESA[e] for e in tabs},
         'turno': turno,
         'etiquetas_turno': dict(ETIQUETA_TURNO),
+        'tipo': tipo,
+        'tipos': list(TIPOS),
+        'etiquetas_tipo': dict(ETIQUETA_TIPO),
         'franja': list(franja) if franja and not turno else None,
         'etiqueta_franja': etiqueta_de_franja(franja) if franja and not turno else None,
         'timbradas_inferidas': sin_empresa,

@@ -155,7 +155,20 @@ class NormalizarInternoTests(TestCase):
 
     def test_la_capacidad_se_encuentra(self):
         self.assertEqual(
-            services.CAPACIDAD_POR_INTERNO[services._norm_interno('INT 7076')], 31)
+            services.CAPACIDAD_POR_INTERNO[services._norm_interno('INT 7076')], 30)
+
+    def test_el_tipo_se_encuentra(self):
+        self.assertEqual(
+            services.TIPO_POR_INTERNO[services._norm_interno('INT 7076')], 'BUSETA')
+        self.assertEqual(
+            services.TIPO_POR_INTERNO[services._norm_interno('INT 7307')], 'BUSETON')
+        self.assertEqual(
+            services.TIPO_POR_INTERNO[services._norm_interno('INT 7273')], 'BUS')
+
+    def test_los_internos_sin_tipo_conservan_su_capacidad(self):
+        clave = services._norm_interno('INT 7239')
+        self.assertEqual(services.CAPACIDAD_POR_INTERNO[clave], 40)
+        self.assertNotIn(clave, services.TIPO_POR_INTERNO)
 
 
 class FranjaDeHorasTests(TestCase):
@@ -217,9 +230,9 @@ class RangeSummaryTests(TestCase):
         por_interno = {v['interno']: v for v in r['vehiculos']}
         self.assertEqual(por_interno['INT 7076']['servicios'], 2)
         self.assertEqual(por_interno['INT 7076']['timbradas'], 31)
-        self.assertEqual(por_interno['INT 7076']['capacidad'], 31)
-        self.assertEqual(por_interno['INT 7076']['ocupacion'], 50)
-        self.assertEqual(por_interno['INT 7076']['capacidad_total'], 62)
+        self.assertEqual(por_interno['INT 7076']['capacidad'], 30)
+        self.assertEqual(por_interno['INT 7076']['ocupacion'], 51.67)
+        self.assertEqual(por_interno['INT 7076']['capacidad_total'], 60)
         self.assertIsNone(por_interno['INT 9999']['ocupacion'])
         self.assertEqual(r['unidades_con_error'], 0)
 
@@ -249,8 +262,27 @@ class RangeSummaryTests(TestCase):
 
         r = services.range_summary('2026-07-20', '2026-07-20')
 
-        self.assertEqual(r['vehiculos'][0]['ocupacion'], 93.55)
-        self.assertEqual(r['ocupacion_flota'], 93.55)
+        self.assertEqual(r['vehiculos'][0]['ocupacion'], 96.67)
+        self.assertEqual(r['ocupacion_flota'], 96.67)
+
+    def test_filtra_por_tipo_de_vehiculo(self, eventos, vehiculos, alertas):
+        # 7076 es buseta y 7273 es bus; 9999 no está en la planilla.
+        vehiculos.return_value = [{'idgps': '100', 'nombre': 'INT 7076'},
+                                  {'idgps': '200', 'nombre': 'INT 7273'},
+                                  {'idgps': '300', 'nombre': 'INT 9999'}]
+        alertas.return_value = []
+        eventos.side_effect = lambda equipo, *a, **k: []
+
+        buseta = services.range_summary('2026-07-20', '2026-07-20', tipo='BUSETA')
+        bus = services.range_summary('2026-07-20', '2026-07-20', tipo='BUS')
+        todos = services.range_summary('2026-07-20', '2026-07-20')
+
+        self.assertEqual([v['interno'] for v in buseta['vehiculos']], ['INT 7076'])
+        self.assertEqual([v['interno'] for v in bus['vehiculos']], ['INT 7273'])
+        self.assertEqual(len(todos['vehiculos']), 3)
+        self.assertEqual(buseta['tipo'], 'BUSETA')
+        self.assertEqual(buseta['vehiculos'][0]['tipo'], 'BUSETA')
+        self.assertIsNone(todos['tipo'])
 
     def test_todas_respeta_el_techo_del_usuario(self, eventos, vehiculos, alertas):
         vehiculos.return_value = self.VEHICULOS[:1]
@@ -609,7 +641,7 @@ class AccesoPorEmpresaTests(TestCase):
                             {'desde': '2026-07-20', 'hasta': '2026-07-20'})
         resumen.assert_called_once_with(
             '2026-07-20', '2026-07-20', None,
-            ['DITAR', services.TAB_SIN_IDENTIFICAR], None, None)
+            ['DITAR', services.TAB_SIN_IDENTIFICAR], None, None, None)
 
     def test_el_mapa_de_flota_es_solo_del_admin(self):
         self.entrar('relianz', 'relianz')
@@ -723,6 +755,23 @@ class DashboardTests(TestCase):
         self.assertContains(r, 'id="hora-desde"')
         for valor in services.TURNOS:
             self.assertContains(r, f'data-turno="{valor}"')
+
+    def test_dibuja_el_select_de_tipo_de_vehiculo(self):
+        r = self.client.get(reverse('tracking:dashboard'))
+        self.assertContains(r, 'id="sel-tipo"')
+        for valor in services.TIPOS:
+            self.assertContains(r, f'data-tipo="{valor}"')
+
+    def test_el_tipo_llega_a_services(self):
+        with patch.object(services, 'range_summary', return_value={}) as resumen:
+            r = self.client.get(reverse('tracking:api_dashboard'), {'tipo': 'buseton'})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(resumen.call_args.args[6], 'BUSETON')
+
+    def test_rechaza_tipo_desconocido(self):
+        r = self.client.get(reverse('tracking:api_dashboard'), {'tipo': 'CAMIONETA'})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('BUSETA', r.json()['error'])
 
     def test_las_horas_a_mano_llegan_a_services_en_minutos(self):
         with patch.object(services, 'range_summary', return_value={}) as resumen:

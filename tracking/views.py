@@ -157,6 +157,8 @@ def dashboard(request):
                      for e in _empresas_permitidas(request)],
         'turnos': [{'valor': t, 'etiqueta': services.ETIQUETA_TURNO[t]}
                    for t in services.TURNOS],
+        'tipos': [{'valor': t, 'etiqueta': services.ETIQUETA_TIPO[t]}
+                  for t in services.TIPOS],
         'usuario': nombre_usuario(request),
         'sesion_nueva': _sesion_nueva(request),
     })
@@ -262,13 +264,21 @@ def api_dashboard(request):
             {'error': f'Turno inválido: {turno}. Usa uno de {", ".join(services.TURNOS)}.'},
             status=400,
         )
+    # El tipo de vehículo tampoco se reparte por usuario: solo deja fuera buses
+    # de los que ya se podían ver.
+    tipo = (request.GET.get('tipo') or '').strip().upper() or None
+    if tipo and tipo not in services.TIPOS:
+        return JsonResponse(
+            {'error': f'Tipo inválido: {tipo}. Usa uno de {", ".join(services.TIPOS)}.'},
+            status=400,
+        )
     try:
         franja = _franja_pedida(request)
     except ValueError as exc:
         return JsonResponse({'error': str(exc)}, status=400)
     return _json_api(
         lambda: services.range_summary(desde, hasta, empresa, permitidas, turno,
-                                       franja))
+                                       franja, tipo))
 
 
 def api_fleet(request):

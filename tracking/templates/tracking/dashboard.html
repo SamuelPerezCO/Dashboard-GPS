@@ -116,6 +116,14 @@
     <option value="{{ e.valor }}" data-empresa="{{ e.valor }}">{{ e.etiqueta }}</option>
     {% endfor %}
   </select>
+  <span class="sep"></span>
+  <label for="sel-tipo">Tipo de vehículo</label>
+  <select id="sel-tipo">
+    <option value="" selected>Todos</option>
+    {% for t in tipos %}
+    <option value="{{ t.valor }}" data-tipo="{{ t.valor }}">{{ t.etiqueta }}</option>
+    {% endfor %}
+  </select>
 </div>
 
 <div class="nota-vacia" id="nota-vacia"></div>
@@ -221,6 +229,7 @@
   const inputHasta = document.getElementById('hasta');
   const btn = document.getElementById('btn-consultar');
   const selEmpresa = document.getElementById('sel-empresa');
+  const selTipo = document.getElementById('sel-tipo');
   const notaVacia = document.getElementById('nota-vacia');
   const notaCarga = document.getElementById('nota-carga');
   const notaTurno = document.getElementById('nota-turno');
@@ -234,6 +243,7 @@
   const contenedoresViz = document.querySelectorAll('.viz');
   let datos = null;
   let empresa = '';
+  let tipo = '';
   let turno = '';
   let cargando = false;
 
@@ -560,7 +570,7 @@
     inputDesde.disabled = ocupado;
     inputHasta.disabled = ocupado;
     btn.disabled = ocupado || !fechasListas();
-    [selEmpresa, selRango, diasCustom, selTurno, horaDesde, horaHasta]
+    [selEmpresa, selTipo, selRango, diasCustom, selTurno, horaDesde, horaHasta]
       .forEach(c => { c.disabled = ocupado; });
   }
 
@@ -586,6 +596,7 @@
       const url = '{% url "tracking:api_dashboard" %}' +
         '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value +
         '&empresa=' + encodeURIComponent(empresa) +
+        '&tipo=' + encodeURIComponent(tipo) +
         '&turno=' + encodeURIComponent(turnoPersonalizado() ? '' : turno) +
         (turnoPersonalizado()
           ? '&hora_desde=' + encodeURIComponent(horaDesde.value) +
@@ -623,6 +634,7 @@
       pintarTodo();
       document.getElementById('estado').textContent =
         ((data.etiquetas || {})[data.empresa] || 'Todas las empresas') + ' · ' +
+        ((data.etiquetas_tipo || {})[data.tipo] || 'Toda la flota') + ' · ' +
         (data.etiqueta_franja ||
          (data.etiquetas_turno || {})[data.turno] || 'Todo el día') + ' · ' +
         ddmmaaaa(data.desde) + ' – ' + ddmmaaaa(data.hasta) +
@@ -641,6 +653,12 @@
   selEmpresa.addEventListener('change', () => {
     if (selEmpresa.value === empresa) return;
     empresa = selEmpresa.value;
+    if (fechasListas()) cargar();
+  });
+
+  selTipo.addEventListener('change', () => {
+    if (selTipo.value === tipo) return;
+    tipo = selTipo.value;
     if (fechasListas()) cargar();
   });
 
