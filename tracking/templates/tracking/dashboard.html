@@ -3,19 +3,6 @@
 
 {% block head %}
 <style>
-  .tabs {
-    display: flex; gap: 4px; flex-wrap: wrap;
-    border-bottom: 1px solid var(--border); margin-bottom: 16px;
-  }
-  .tabs button {
-    background: none; border: none; border-bottom: 2px solid transparent;
-    color: var(--text-secondary); font: inherit; font-weight: 550;
-    padding: 8px 14px; margin-bottom: -1px; cursor: pointer; border-radius: 6px 6px 0 0;
-  }
-  .tabs button:hover { background: var(--grid); }
-  .tabs button.activa { color: var(--text-primary); border-bottom-color: var(--series-1); }
-  .tabs button:disabled { opacity: 0.6; cursor: wait; }
-
   .nota-vacia {
     background: var(--surface-1); border: 1px solid var(--baseline);
     border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;
@@ -50,6 +37,7 @@
   .filtros .personalizado { display: none; align-items: center; gap: 6px; }
   .filtros .personalizado.visible { display: flex; }
 
+  .filtros.empresas { border-bottom: 1px solid var(--border); padding-bottom: 14px; }
   .filtros.turnos { margin-top: -6px; }
   .filtros .nota-turno {
     flex-basis: 100%; margin-top: -4px;
@@ -120,11 +108,14 @@
 {% endblock %}
 
 {% block content %}
-<div class="tabs" id="tabs-empresa">
-  <button class="activa" data-empresa="">Todas</button>
-  {% for e in empresas %}
-  <button data-empresa="{{ e.valor }}">{{ e.etiqueta }}</button>
-  {% endfor %}
+<div class="filtros empresas">
+  <label for="sel-empresa">Empresa</label>
+  <select id="sel-empresa">
+    <option value="" selected>Todas</option>
+    {% for e in empresas %}
+    <option value="{{ e.valor }}" data-empresa="{{ e.valor }}">{{ e.etiqueta }}</option>
+    {% endfor %}
+  </select>
 </div>
 
 <div class="nota-vacia" id="nota-vacia"></div>
@@ -229,7 +220,7 @@
   const inputDesde = document.getElementById('desde');
   const inputHasta = document.getElementById('hasta');
   const btn = document.getElementById('btn-consultar');
-  const tabs = document.getElementById('tabs-empresa');
+  const selEmpresa = document.getElementById('sel-empresa');
   const notaVacia = document.getElementById('nota-vacia');
   const notaCarga = document.getElementById('nota-carga');
   const notaTurno = document.getElementById('nota-turno');
@@ -425,14 +416,14 @@
             `la actividad de DITAR y RELIANZ aparece aquí, mezclada con algunos ` +
             `viajes de PROCAPS cuya entrada no quedó registrada. Al crear las ` +
             `geocercas de DITAR y RELIANZ, estas timbradas se reparten solas entre ` +
-            `sus pestañas.`;
+            `cada empresa.`;
     } else if ((datos.empresa === 'DITAR' || datos.empresa === 'RELIANZ') && totalServicios === 0) {
       msg = `<b>Todavía no existe la geocerca de ${etiqueta} en la plataforma.</b> ` +
             `La empresa de cada servicio se reconoce por el nombre de la geocerca en ` +
             `la que entra el bus, así que mientras no se cree la de ${etiqueta} esta ` +
-            `pestaña se queda en cero y sus timbradas se ven en ` +
+            `vista se queda en cero y sus timbradas se ven en ` +
             `<b>Sin identificar</b> (${fmt(inferidas)} en este rango). En cuanto la ` +
-            `geocerca exista y se llame «${etiqueta}», esta pestaña se llena sola.`;
+            `geocerca exista y se llame «${etiqueta}», esta vista se llena sola.`;
     } else if (datos.empresa && totalServicios === 0) {
       msg = `<b>Sin servicios de ${etiqueta} en este rango.</b> Los servicios se ` +
             `cuentan cuando el bus entra a una geocerca de la empresa.`;
@@ -569,8 +560,7 @@
     inputDesde.disabled = ocupado;
     inputHasta.disabled = ocupado;
     btn.disabled = ocupado || !fechasListas();
-    tabs.querySelectorAll('button').forEach(b => { b.disabled = ocupado; });
-    [selRango, diasCustom, selTurno, horaDesde, horaHasta]
+    [selEmpresa, selRango, diasCustom, selTurno, horaDesde, horaHasta]
       .forEach(c => { c.disabled = ocupado; });
   }
 
@@ -648,11 +638,9 @@
     }
   }
 
-  tabs.addEventListener('click', (ev) => {
-    const b = ev.target.closest('button');
-    if (!b || b.dataset.empresa === empresa) return;
-    empresa = b.dataset.empresa;
-    tabs.querySelectorAll('button').forEach(x => x.classList.toggle('activa', x === b));
+  selEmpresa.addEventListener('change', () => {
+    if (selEmpresa.value === empresa) return;
+    empresa = selEmpresa.value;
     if (fechasListas()) cargar();
   });
 
