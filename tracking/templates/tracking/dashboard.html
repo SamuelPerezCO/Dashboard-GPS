@@ -45,6 +45,19 @@
   }
   .filtros .nota-turno.visible { display: block; }
 
+  /* Avisa que las fechas cambiaron y todavía no se han consultado. */
+  .filtros .nota-consultar {
+    color: var(--text-secondary); font-size: 12px; display: none;
+  }
+  .filtros .nota-consultar.visible { display: inline; }
+  .filtros .nota-consultar b { color: var(--text-primary); }
+
+  .filtros .nota-ruta {
+    flex-basis: 100%; margin-top: -2px;
+    color: var(--text-muted); font-size: 12px; display: none;
+  }
+  .filtros .nota-ruta.visible { display: block; }
+
   .tile-flota {
     margin-left: auto; padding: 8px 18px; text-align: right;
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
@@ -128,6 +141,15 @@
     <option value="{{ t.valor }}" data-tipo="{{ t.valor }}">{{ t.etiqueta }}</option>
     {% endfor %}
   </select>
+  <span class="sep"></span>
+  <label for="sel-ruta">Ruta</label>
+  <select id="sel-ruta" disabled>
+    <option value="" selected>Todas</option>
+  </select>
+  <span class="nota-ruta" id="nota-ruta">
+    Las rutas son las geocercas que aparecieron en el rango consultado: la
+    lista se llena con la primera consulta.
+  </span>
 </div>
 
 <div class="nota-vacia" id="nota-vacia"></div>
@@ -141,15 +163,12 @@
   <span class="sep"></span>
   <label for="sel-rango">Rango</label>
   <select id="sel-rango">
-    <option value="">Elegido a mano</option>
+    <option value="">Personalizado</option>
     <option value="7">Última semana</option>
     <option value="30">Último mes</option>
-    <option value="custom">Días personalizados…</option>
   </select>
-  <span class="personalizado" id="rango-custom">
-    <label for="dias-custom">últimos</label>
-    <input type="number" id="dias-custom" min="1" max="366" step="1" value="15">
-    <label for="dias-custom">días</label>
+  <span class="nota-consultar" id="nota-consultar">
+    Presiona <b>Consultar</b> para ver estos días.
   </span>
 
   <div class="tile-flota">
@@ -232,8 +251,9 @@
   const notaCarga = document.getElementById('nota-carga');
   const notaTurno = document.getElementById('nota-turno');
   const selRango = document.getElementById('sel-rango');
-  const diasCustom = document.getElementById('dias-custom');
-  const cajaRangoCustom = document.getElementById('rango-custom');
+  const notaConsultar = document.getElementById('nota-consultar');
+  const selRuta = document.getElementById('sel-ruta');
+  const notaRuta = document.getElementById('nota-ruta');
   const selTurno = document.getElementById('sel-turno');
   const horaDesde = document.getElementById('hora-desde');
   const horaHasta = document.getElementById('hora-hasta');
@@ -243,7 +263,12 @@
   let empresa = '';
   let tipo = '';
   let turno = '';
+  let ruta = '';
   let cargando = false;
+  // Las fechas elegidas todavía no se han consultado: mientras esto sea
+  // cierto, nada consulta solo. El rango de días siempre lo confirma la
+  // persona con «Consultar».
+  let pendiente = false;
 
   const ddmmaaaa = (f) => f.split('-').reverse().join('/');
 
@@ -473,7 +498,7 @@
     pintarEstado(
       `<div class="estado-viz">${ICONO_FECHAS}
          <div class="titulo">Selecciona las fechas</div>
-         <div class="sub">Elige el rango en «Desde» y «hasta»: la consulta arranca sola.</div>
+         <div class="sub">Elige el rango en «Desde» y «hasta» y presiona «Consultar».</div>
        </div>`,
       'Selecciona las fechas para ver el detalle.', 'sin consultar');
   }
@@ -568,8 +593,23 @@
     inputDesde.disabled = ocupado;
     inputHasta.disabled = ocupado;
     btn.disabled = ocupado || !fechasListas();
-    [selEmpresa, selTipo, selRango, diasCustom, selTurno, horaDesde, horaHasta]
+    [selEmpresa, selTipo, selRango, selTurno, horaDesde, horaHasta]
       .forEach(c => { c.disabled = ocupado; });
+    selRuta.disabled = ocupado || selRuta.options.length <= 1;
+  }
+
+  // El selector de rutas se llena con lo que trajo la consulta: las rutas son
+  // los nombres de las geocercas, y esos solo se conocen mirando el rango.
+  function llenarRutas(rutas) {
+    const previa = ruta;
+    selRuta.innerHTML = '';
+    selRuta.add(new Option('Todas', ''));
+    (rutas || []).forEach(r => selRuta.add(new Option(r, r)));
+    selRuta.value = previa;
+    // La ruta elegida puede no existir en el rango nuevo: ahí se vuelve a «Todas».
+    if (selRuta.value !== previa) { ruta = ''; selRuta.value = ''; }
+    selRuta.disabled = cargando || selRuta.options.length <= 1;
+    notaRuta.classList.toggle('visible', selRuta.options.length <= 1);
   }
 
   async function cargar() {
@@ -577,6 +617,8 @@
     if (cargando) return;
     if (!fechasListas()) { estadoSinFechas(); return; }
     cargando = true;
+    pendiente = false;
+    notaConsultar.classList.remove('visible');
     const dias = diasDelRango();
     bloquearControles(true);
     estadoCargando();
@@ -595,6 +637,7 @@
         '?desde=' + inputDesde.value + '&hasta=' + inputHasta.value +
         '&empresa=' + encodeURIComponent(empresa) +
         '&tipo=' + encodeURIComponent(tipo) +
+        '&ruta=' + encodeURIComponent(ruta) +
         '&turno=' + encodeURIComponent(turnoPersonalizado() ? '' : turno) +
         (turnoPersonalizado()
           ? '&hora_desde=' + encodeURIComponent(horaDesde.value) +
@@ -629,10 +672,12 @@
         ocultarAviso();
       }
       datos = data;
+      llenarRutas(data.rutas);
       pintarTodo();
       document.getElementById('estado').textContent =
         ((data.etiquetas || {})[data.empresa] || 'Todas las empresas') + ' · ' +
         ((data.etiquetas_tipo || {})[data.tipo] || 'Toda la flota') + ' · ' +
+        (data.ruta || 'Todas las rutas') + ' · ' +
         (data.etiqueta_franja ||
          (data.etiquetas_turno || {})[data.turno] || 'Todo el día') + ' · ' +
         ddmmaaaa(data.desde) + ' – ' + ddmmaaaa(data.hasta) +
@@ -648,16 +693,25 @@
     }
   }
 
+  // Con fechas sin confirmar no se consulta nada: primero «Consultar».
+  const puedeConsultar = () => !pendiente && fechasListas();
+
   selEmpresa.addEventListener('change', () => {
     if (selEmpresa.value === empresa) return;
     empresa = selEmpresa.value;
-    if (fechasListas()) cargar();
+    if (puedeConsultar()) cargar();
   });
 
   selTipo.addEventListener('change', () => {
     if (selTipo.value === tipo) return;
     tipo = selTipo.value;
-    if (fechasListas()) cargar();
+    if (puedeConsultar()) cargar();
+  });
+
+  selRuta.addEventListener('change', () => {
+    if (selRuta.value === ruta) return;
+    ruta = selRuta.value;
+    if (puedeConsultar()) cargar();
   });
 
   const turnoPersonalizado = () => turno === 'custom';
@@ -677,7 +731,7 @@
     cajaTurnoCustom.classList.toggle('visible', turnoPersonalizado());
     refrescarNotaTurno();
     if (turnoPersonalizado() && !(horaDesde.value && horaHasta.value)) return;
-    if (fechasListas()) cargar();
+    if (puedeConsultar()) cargar();
   }
 
   selTurno.addEventListener('change', aplicarTurno);
@@ -685,53 +739,45 @@
   [horaDesde, horaHasta].forEach(input => input.addEventListener('change', () => {
     if (!turnoPersonalizado()) return;
     refrescarNotaTurno();
-    if (horaDesde.value && horaHasta.value && fechasListas()) cargar();
+    if (horaDesde.value && horaHasta.value && puedeConsultar()) cargar();
   }));
 
-  [inputDesde, inputHasta].forEach(input => input.addEventListener('change', () => {
-    // Tocar las fechas a mano deja de ser cualquiera de los rangos del select.
-    selRango.value = '';
-    cajaRangoCustom.classList.remove('visible');
+  // Elegir días nunca consulta solo: deja el botón listo y avisa que hay que
+  // presionarlo. Así nadie dispara sin querer una consulta de meses.
+  function marcarPendiente() {
+    pendiente = true;
     btn.disabled = !fechasListas();
-    if (fechasListas()) cargar();
-    else if (!datos) estadoSinFechas();
+    notaConsultar.classList.toggle('visible', fechasListas());
+    if (!datos && !fechasListas()) estadoSinFechas();
+  }
+
+  [inputDesde, inputHasta].forEach(input => input.addEventListener('change', () => {
+    // Tocar las fechas a mano las vuelve «Personalizado», no un rango del select.
+    selRango.value = '';
+    marcarPendiente();
   }));
 
   [inputDesde, inputHasta].forEach(input => input.addEventListener('focus', fijarTopeHoy));
-
-  const DIAS_MAX = 366;
 
   function ponerUltimosDias(dias) {
     const fin = new Date();
     const ini = new Date(fin); ini.setDate(fin.getDate() - (dias - 1));
     inputHasta.value = fin.toLocaleDateString('sv-SE');
     inputDesde.value = ini.toLocaleDateString('sv-SE');
-    btn.disabled = false;
-    cargar();
-  }
-
-  function aplicarDiasCustom() {
-    const dias = Math.min(DIAS_MAX, Math.max(1, Math.round(+diasCustom.value || 0)));
-    diasCustom.value = dias;
-    ponerUltimosDias(dias);
+    marcarPendiente();
   }
 
   selRango.addEventListener('change', () => {
-    const custom = selRango.value === 'custom';
-    cajaRangoCustom.classList.toggle('visible', custom);
-    if (custom) { aplicarDiasCustom(); return; }
     if (selRango.value) ponerUltimosDias(+selRango.value);
-  });
-
-  diasCustom.addEventListener('change', () => {
-    if (selRango.value === 'custom') aplicarDiasCustom();
   });
 
   btn.addEventListener('click', cargar);
 
   window.addEventListener('resize', () => { if (!cargando) pintarTodo(); });
 
+  llenarRutas([]);
   estadoSinFechas();
-  document.getElementById('estado').textContent = 'Selecciona un rango de fechas';
+  document.getElementById('estado').textContent =
+    'Selecciona un rango de fechas y presiona «Consultar»';
 </script>
 {% endblock %}

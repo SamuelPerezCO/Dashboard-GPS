@@ -41,6 +41,16 @@ def _norm_interno(interno):
     return ''.join((interno or '').upper().split())
 
 
+def _norm_ruta(nombre):
+    """Deja el nombre de una geocerca comparable: 'ruta  1' -> 'RUTA 1'.
+
+    A diferencia del interno aquí se conservan los espacios (uno solo entre
+    palabras): el nombre de la geocerca es texto libre y pegarlo todo junto
+    volvería iguales rutas que no lo son.
+    """
+    return ' '.join((nombre or '').upper().split())
+
+
 TIPOS = ('BUSETA', 'BUSETON', 'BUS')
 
 ETIQUETA_TIPO = {
@@ -392,16 +402,26 @@ def _servicios_del_dia(fecha, es_hoy):
     return servicios
 
 
-def _empresa_de_timbrada(hora, servicios_del_bus):
-    """Empresa a la que se le apunta una timbrada.
+def _servicio_de_timbrada(hora, servicios_del_bus):
+    """Servicio al que se le apunta una timbrada.
 
-    La timbrada no dice de quién es, así que se le atribuye la del siguiente
-    servicio de ese bus ese día, o la del último si ya no quedan.
+    La timbrada no dice de quién es, así que se le atribuye el siguiente
+    servicio de ese bus ese día, o el último si ya no quedan.
+
+    Args:
+        servicios_del_bus: Ternas (hora, empresa, geocerca) ordenadas por hora.
+
+    Returns:
+        La pareja (empresa, geocerca) del servicio, o (None, '') si el bus no
+        registró ninguno ese día.
     """
-    for h, empresa in servicios_del_bus:
+    for h, empresa, geocerca in servicios_del_bus:
         if h >= hora:
-            return empresa
-    return servicios_del_bus[-1][1] if servicios_del_bus else None
+            return empresa, geocerca
+    if not servicios_del_bus:
+        return None, ''
+    _, empresa, geocerca = servicios_del_bus[-1]
+    return empresa, geocerca
 
 
 def _timbradas_de_vehiculo(equipo, desde, hasta_efectivo, hoy,
@@ -439,7 +459,7 @@ def _lista_dias(desde, hasta):
 
 
 def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=None,
-                  franja=None, tipo=None):
+                  franja=None, tipo=None, ruta=None):
     """Ocupación del rango: por bus, por día y de la flota entera.
 
     La ocupación de un bus es timbradas / (servicios × capacidad): pasajeros
@@ -462,8 +482,12 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
         tipo: Tipo de vehículo (uno de TIPOS), o None para toda la flota. Deja
             fuera los buses de otro tipo, no sus viajes: el bus entero
             desaparece de las gráficas y del detalle.
+        ruta: Nombre de la geocerca, o None para todas. Los buses siguen
+            saliendo todos, pero solo se les cuentan los servicios de esa
+            geocerca y las timbradas que se le atribuyeron.
     """
     hoy = _hoy()
+    ruta = _norm_ruta(ruta) or None
     if franja:
         turno = None
     else:
@@ -492,16 +516,26 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
 
     servicios = Counter()
     servicios_bus_dia = defaultdict(list)
+    # Rutas que aparecieron en el rango, para llenar el selector. Se juntan
+    # antes de recortar por ruta y por franja: si se armara con lo ya filtrado,
+    # al elegir una ruta el selector se quedaría con esa sola.
+    rutas_vistas = {}
     for d, servicios_del_dia in zip(dias_consultables, servicios_por_dia):
         for s in servicios_del_dia:
             # El índice por bus y día se arma con los servicios de todo el día,
             # aunque se esté viendo un turno: es lo que le pone empresa a cada
             # timbrada, y el servicio que se la pone bien puede ser del turno
             # de al lado.
-            servicios_bus_dia[(s['equipo'], d)].append((s['hora'], s['empresa']))
+            servicios_bus_dia[(s['equipo'], d)].append(
+                (s['hora'], s['empresa'], s['geocerca']))
+            en_tabs = filtro is None or tab_de_empresa(s['empresa']) in filtro
+            if en_tabs and s['geocerca']:
+                rutas_vistas.setdefault(_norm_ruta(s['geocerca']), s['geocerca'].strip())
             if franja and not en_franja(s['hora'], franja):
                 continue
-            if filtro is None or tab_de_empresa(s['empresa']) in filtro:
+            if ruta and _norm_ruta(s['geocerca']) != ruta:
+                continue
+            if en_tabs:
                 servicios[s['equipo']] += 1
 
     lecturas = _en_paralelo(
@@ -523,15 +557,19 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
         if franja:
             ev_rango = [e for e in ev_rango if en_franja(e['hora'], franja)]
 
-        emp_por_timbrada = [
-            _empresa_de_timbrada(
+        atribucion = [
+            _servicio_de_timbrada(
                 e['hora'], servicios_bus_dia.get((str(equipo), e['fecha']), []))
             for e in ev_rango
         ]
-        sin_empresa += sum(1 for e in emp_por_timbrada if e is None)
+        sin_empresa += sum(1 for emp, _ in atribucion if emp is None)
         if filtro is not None:
-            ev_rango = [e for e, emp in zip(ev_rango, emp_por_timbrada)
+            ev_rango = [e for e, (emp, _) in zip(ev_rango, atribucion)
                         if tab_de_empresa(emp) in filtro]
+            atribucion = [a for a in atribucion if tab_de_empresa(a[0]) in filtro]
+        if ruta:
+            ev_rango = [e for e, (_, geo) in zip(ev_rango, atribucion)
+                        if _norm_ruta(geo) == ruta]
 
         timbradas = len(ev_rango)
         n_servicios = servicios.get(str(equipo), 0)
@@ -574,6 +612,8 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
         'tipo': tipo,
         'tipos': list(TIPOS),
         'etiquetas_tipo': dict(ETIQUETA_TIPO),
+        'ruta': ruta,
+        'rutas': sorted(rutas_vistas.values()),
         'franja': list(franja) if franja and not turno else None,
         'etiqueta_franja': etiqueta_de_franja(franja) if franja and not turno else None,
         'timbradas_inferidas': sin_empresa,

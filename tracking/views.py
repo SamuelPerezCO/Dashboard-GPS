@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 FECHA_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 HORA_RE = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
 
+MAX_LARGO_RUTA = 120
+
 MAX_INTENTOS = 5
 BLOQUEO_SEGUNDOS = 60
 
@@ -272,13 +274,22 @@ def api_dashboard(request):
             {'error': f'Tipo inválido: {tipo}. Usa uno de {", ".join(services.TIPOS)}.'},
             status=400,
         )
+    # La ruta es el nombre de una geocerca, texto libre que sale de los datos
+    # del rango: no hay lista fija contra la cual validarla. Si no existe, el
+    # resultado sale vacío, que es la respuesta correcta.
+    ruta = (request.GET.get('ruta') or '').strip()
+    if len(ruta) > MAX_LARGO_RUTA:
+        return JsonResponse(
+            {'error': f'Nombre de ruta demasiado largo (máximo {MAX_LARGO_RUTA}).'},
+            status=400,
+        )
     try:
         franja = _franja_pedida(request)
     except ValueError as exc:
         return JsonResponse({'error': str(exc)}, status=400)
     return _json_api(
         lambda: services.range_summary(desde, hasta, empresa, permitidas, turno,
-                                       franja, tipo))
+                                       franja, tipo, ruta or None))
 
 
 def api_fleet(request):

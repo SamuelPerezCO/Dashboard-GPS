@@ -127,22 +127,34 @@ class EntradaGeocercaTests(TestCase):
 
 
 class EmpresaDeTimbradaTests(TestCase):
-    """A qué empresa se le apunta cada timbrada."""
+    """A qué servicio, y con él a qué empresa y ruta, se apunta cada timbrada."""
 
-    SERVICIOS = [('08:00:00', 'PROCAPS'), ('14:00:00', 'DITAR')]
+    SERVICIOS = [('08:00:00', 'PROCAPS', 'RUTA 1'),
+                 ('14:00:00', 'DITAR', 'DITAR NORTE')]
 
     def test_toma_el_servicio_siguiente(self):
         self.assertEqual(
-            services._empresa_de_timbrada('07:30:00', self.SERVICIOS), 'PROCAPS')
+            services._servicio_de_timbrada('07:30:00', self.SERVICIOS),
+            ('PROCAPS', 'RUTA 1'))
         self.assertEqual(
-            services._empresa_de_timbrada('10:00:00', self.SERVICIOS), 'DITAR')
+            services._servicio_de_timbrada('10:00:00', self.SERVICIOS),
+            ('DITAR', 'DITAR NORTE'))
 
     def test_despues_del_ultimo_usa_el_ultimo(self):
         self.assertEqual(
-            services._empresa_de_timbrada('23:00:00', self.SERVICIOS), 'DITAR')
+            services._servicio_de_timbrada('23:00:00', self.SERVICIOS),
+            ('DITAR', 'DITAR NORTE'))
 
     def test_sin_servicios_no_hay_empresa(self):
-        self.assertIsNone(services._empresa_de_timbrada('10:00:00', []))
+        self.assertEqual(services._servicio_de_timbrada('10:00:00', []), (None, ''))
+
+
+class NormalizarRutaTests(TestCase):
+    """Las rutas se comparan en mayúsculas y con un solo espacio."""
+
+    def test_normaliza(self):
+        self.assertEqual(services._norm_ruta(' ruta   1 '), 'RUTA 1')
+        self.assertEqual(services._norm_ruta(None), '')
 
 
 class NormalizarInternoTests(TestCase):
@@ -381,6 +393,47 @@ class RangeSummaryTests(TestCase):
 
         self.assertEqual(r['vehiculos'][0]['timbradas'], 1)
         self.assertIsNone(r['turno'])
+
+    def test_lista_las_rutas_del_rango(self, eventos, vehiculos, alertas):
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = [_alerta('100', '08:00:00', 'RUTA 2'),
+                                _alerta('100', '14:00:00', 'RUTA 1'),
+                                _alerta('100', '16:00:00', 'RUTA 1')]
+        eventos.return_value = []
+
+        r = services.range_summary('2026-07-20', '2026-07-20')
+
+        self.assertEqual(r['rutas'], ['RUTA 1', 'RUTA 2'])
+        self.assertIsNone(r['ruta'])
+
+    def test_filtra_por_ruta(self, eventos, vehiculos, alertas):
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = [_alerta('100', '08:00:00', 'RUTA 1'),
+                                _alerta('100', '14:00:00', 'RUTA 2')]
+        eventos.side_effect = lambda equipo, *a, **k: [
+            {'fecha': '2026-07-20', 'hora': '07:00:00', 'pasajero': 'a'},
+            {'fecha': '2026-07-20', 'hora': '13:00:00', 'pasajero': 'b'},
+        ]
+
+        r = services.range_summary('2026-07-20', '2026-07-20', ruta='ruta 1')
+
+        bus = r['vehiculos'][0]
+        self.assertEqual((bus['servicios'], bus['timbradas']), (1, 1))
+        self.assertEqual(r['ruta'], 'RUTA 1')
+        # El selector no se recorta con lo elegido: siguen las dos rutas.
+        self.assertEqual(r['rutas'], ['RUTA 1', 'RUTA 2'])
+
+    def test_una_ruta_que_no_existe_deja_todo_en_cero(self, eventos, vehiculos,
+                                                      alertas):
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = [_alerta('100', '08:00:00', 'RUTA 1')]
+        eventos.side_effect = lambda equipo, *a, **k: [
+            {'fecha': '2026-07-20', 'hora': '07:00:00', 'pasajero': 'a'}]
+
+        r = services.range_summary('2026-07-20', '2026-07-20', ruta='RUTA 9')
+
+        bus = r['vehiculos'][0]
+        self.assertEqual((bus['servicios'], bus['timbradas']), (0, 0))
 
     def test_el_detalle_trae_una_fila_por_dia(self, eventos, vehiculos, alertas):
         vehiculos.return_value = self.VEHICULOS[:1]
@@ -641,7 +694,7 @@ class AccesoPorEmpresaTests(TestCase):
                             {'desde': '2026-07-20', 'hasta': '2026-07-20'})
         resumen.assert_called_once_with(
             '2026-07-20', '2026-07-20', None,
-            ['DITAR', services.TAB_SIN_IDENTIFICAR], None, None, None)
+            ['DITAR', services.TAB_SIN_IDENTIFICAR], None, None, None, None)
 
     def test_el_mapa_de_flota_es_solo_del_admin(self):
         self.entrar('relianz', 'relianz')
@@ -751,8 +804,11 @@ class DashboardTests(TestCase):
         r = self.client.get(reverse('tracking:dashboard'))
         self.assertContains(r, 'id="sel-rango"')
         self.assertContains(r, 'id="sel-turno"')
-        self.assertContains(r, 'id="dias-custom"')
         self.assertContains(r, 'id="hora-desde"')
+        # El rango solo ofrece los atajos y «Personalizado»: los días a mano
+        # se eligen en «Desde» y «hasta».
+        self.assertContains(r, 'Personalizado')
+        self.assertNotContains(r, 'id="dias-custom"')
         for valor in services.TURNOS:
             self.assertContains(r, f'data-turno="{valor}"')
 
@@ -761,6 +817,27 @@ class DashboardTests(TestCase):
         self.assertContains(r, 'id="sel-tipo"')
         for valor in services.TIPOS:
             self.assertContains(r, f'data-tipo="{valor}"')
+
+    def test_dibuja_el_select_de_ruta(self):
+        r = self.client.get(reverse('tracking:dashboard'))
+        self.assertContains(r, 'id="sel-ruta"')
+
+    def test_la_ruta_llega_a_services(self):
+        with patch.object(services, 'range_summary', return_value={}) as resumen:
+            r = self.client.get(reverse('tracking:api_dashboard'), {'ruta': ' RUTA 3 '})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(resumen.call_args.args[7], 'RUTA 3')
+
+    def test_sin_ruta_no_se_filtra(self):
+        with patch.object(services, 'range_summary', return_value={}) as resumen:
+            self.client.get(reverse('tracking:api_dashboard'))
+        self.assertIsNone(resumen.call_args.args[7])
+
+    def test_rechaza_una_ruta_larguisima(self):
+        r = self.client.get(reverse('tracking:api_dashboard'),
+                            {'ruta': 'X' * (views.MAX_LARGO_RUTA + 1)})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('demasiado largo', r.json()['error'])
 
     def test_el_tipo_llega_a_services(self):
         with patch.object(services, 'range_summary', return_value={}) as resumen:
