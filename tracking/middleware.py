@@ -1,13 +1,15 @@
 """Sesión del dashboard: quién entró y qué puede ver.
 
-No hay usuarios en base de datos; el catálogo es DASHBOARD_USUARIOS en
-settings, y los permisos se releen de ahí en cada petición para que
-quitarle el acceso a alguien surta efecto de inmediato.
+El catálogo de cuentas es DashboardUsuario en base de datos, y los permisos
+se releen de ahí en cada petición para que quitarle el acceso a alguien (o
+desactivarlo desde /admin/) surta efecto de inmediato.
 """
 
 from django.conf import settings
 from django.shortcuts import redirect
 from django.urls import reverse
+
+from .models import DashboardUsuario
 
 CLAVE_SESION = 'dashboard_autenticado'
 
@@ -21,13 +23,30 @@ def nombre_usuario(request):
     return request.session.get(CLAVE_USUARIO) or ''
 
 
+CLAVE_CACHE_CUENTA = '_dashboard_cuenta_cache'
+
+
 def cuenta_actual(request):
     """Ficha del usuario en el catálogo.
 
+    Se cachea en el propio `request`: el middleware y la vista la piden
+    cada uno por su lado, y sin esto cada petición le pegaría dos veces a
+    Supabase por la red en vez de una.
+
     Returns:
-        None si no hay sesión, o si al usuario ya le quitaron el acceso.
+        None si no hay sesión, o si al usuario ya le quitaron el acceso
+        (borrado o desactivado en /admin/).
     """
-    return settings.DASHBOARD_USUARIOS.get(nombre_usuario(request))
+    if hasattr(request, CLAVE_CACHE_CUENTA):
+        return getattr(request, CLAVE_CACHE_CUENTA)
+    nombre = nombre_usuario(request)
+    cuenta = None
+    if nombre:
+        usuario = DashboardUsuario.objects.filter(usuario=nombre, activo=True).first()
+        if usuario is not None:
+            cuenta = {'empresas': usuario.empresas_tuple}
+    setattr(request, CLAVE_CACHE_CUENTA, cuenta)
+    return cuenta
 
 
 def esta_autenticado(request):

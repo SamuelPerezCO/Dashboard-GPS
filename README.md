@@ -260,17 +260,34 @@ solo para `admin`: muestra la flota completa, que no está repartida por empresa
 
 ## Despliegue (Render)
 
-El build solo necesita:
+Las peticiones a la GPS API siguen sin tocar base de datos, y la sesión del
+login sigue viajando en una cookie firmada. Lo que sí vive en base de
+datos ahora son las cuentas del dashboard (`DashboardUsuario`), en Postgres
+de Supabase — el disco de Render es efímero, así que no puede ser
+`db.sqlite3`.
+
+El build necesita:
 
 ```bash
 pip install -r requirements.txt
+python manage.py migrate
 python manage.py collectstatic --no-input
 ```
 
-**No hace falta `migrate`.** El dashboard no guarda nada en base de datos: los
-datos vienen del API y la sesión del login viaja en una cookie firmada. El
-disco de Render es efímero, así que cualquier cosa escrita en `db.sqlite3` se
-perdería de todos modos.
+La primera vez, además:
+
+```bash
+# Migra las 4 cuentas históricas (admin/procaps/ditar/relianz) a la base
+# nueva. Idempotente: se puede volver a correr sin duplicar nada.
+python manage.py seed_dashboard_usuarios
+
+# Para poder entrar a /admin/ y gestionar DashboardUsuario desde ahí.
+python manage.py createsuperuser
+```
+
+De ahí en adelante, las cuentas del dashboard se crean, editan y desactivan
+desde `/admin/` — no hace falta volver a tocar variables de entorno ni
+redesplegar.
 
 Variables de entorno que hay que poner en Render:
 
@@ -278,8 +295,9 @@ Variables de entorno que hay que poner en Render:
 |---|---|
 | `DJANGO_DEBUG` | **`0`.** Con `1`, cualquier error muestra el código, las variables locales y las credenciales a quien entre. |
 | `DJANGO_SECRET_KEY` | Firma la cookie de sesión. Si falta, se usa la clave de ejemplo que está en el repo y **cualquiera podría fabricarse una sesión válida**. |
+| `DATABASE_URL` | Conexión a Postgres de Supabase (usa el "Transaction pooler", puerto 6543). Sin ella cae a sqlite, que en Render se pierde en cada redeploy. |
 | `GPS_APIKEY`, `GPS_USERNAME`, `GPS_PASSWORD` | Acceso al WebService. |
-| `DASHBOARD_CLAVE_ADMIN`, `DASHBOARD_CLAVE_PROCAPS`, `DASHBOARD_CLAVE_DITAR`, `DASHBOARD_CLAVE_RELIANZ` | Contraseñas del dashboard. Sin ellas se usan las del repositorio, que **cualquiera puede leer en GitHub**. |
+| `DASHBOARD_CLAVE_ADMIN`, `DASHBOARD_CLAVE_PROCAPS`, `DASHBOARD_CLAVE_DITAR`, `DASHBOARD_CLAVE_RELIANZ` | Solo las lee `seed_dashboard_usuarios`, una vez. Después de correrlo se pueden quitar: las claves reales ya viven hasheadas en la base. |
 
 ## Licencia
 

@@ -4,18 +4,18 @@ import logging
 import re
 import threading
 
-from django.conf import settings
+from django.contrib.auth.hashers import make_password
 from django.core.cache import cache
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
-from django.utils.crypto import constant_time_compare
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from . import api_client, services
 from .middleware import (CLAVE_LOGIN_NUEVO, CLAVE_SESION, CLAVE_USUARIO,
                          cuenta_actual, esta_autenticado, nombre_usuario,
                          tiene_acceso_total)
+from .models import DashboardUsuario
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +88,9 @@ def home(request):
 def login_view(request):
     """Formulario de acceso al dashboard, y la raíz del sitio.
 
-    Compara contra DASHBOARD_USUARIOS: el usuario no distingue mayúsculas,
-    la contraseña sí. Tras MAX_INTENTOS fallos desde la misma IP el login
-    se bloquea un rato, porque el sitio es público.
+    Compara contra DashboardUsuario: el usuario no distingue mayúsculas, la
+    contraseña sí. Tras MAX_INTENTOS fallos desde la misma IP el login se
+    bloquea un rato, porque el sitio es público.
 
     El GET además manda a precalentar el dashboard: mientras la persona
     escribe su contraseña, el servidor va adelantando consultas al API.
@@ -116,8 +116,15 @@ def login_view(request):
         else:
             usuario = (request.POST.get('usuario') or '').strip().lower()
             clave = request.POST.get('clave') or ''
-            cuenta = settings.DASHBOARD_USUARIOS.get(usuario)
-            ok_clave = constant_time_compare(clave, cuenta['clave'] if cuenta else '')
+            cuenta = DashboardUsuario.objects.filter(usuario=usuario, activo=True).first()
+            if cuenta is not None:
+                ok_clave = cuenta.check_clave(clave)
+            else:
+                # Se hashea la clave igual: sin esto, un usuario inexistente
+                # respondería más rápido que uno real, delatando qué
+                # nombres de usuario existen.
+                make_password(clave)
+                ok_clave = False
             if cuenta and ok_clave:
                 cache.delete(clave_intentos)
                 request.session.cycle_key()
