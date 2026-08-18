@@ -11,6 +11,7 @@ from django.urls import reverse
 from . import services, views
 from .middleware import CLAVE_SESION, CLAVE_USUARIO
 from .models import DashboardUsuario
+from .models import DashboardUsuario
 
 # Las mismas cuentas y claves que antes vivían en settings.DASHBOARD_USUARIOS,
 # ahora como fixture para las pruebas que necesitan una sesión iniciada.

@@ -9,3 +9,4 @@ whitenoise==6.12.0       # sirve los archivos estáticos (CSS del admin, etc.)
 redis==6.4.0             # cliente del cache compartido (solo si hay REDIS_URL)
 psycopg2-binary==2.9.12   # driver de Postgres (Supabase), solo si hay DATABASE_URL
 dj-database-url==3.1.2    # parsea DATABASE_URL para el DATABASES de Django
+openpyxl==3.1.5           # lee archivos .xlsx (import_flota_xlsx)

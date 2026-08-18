@@ -44,7 +44,7 @@ def cuenta_actual(request):
     if nombre:
         usuario = DashboardUsuario.objects.filter(usuario=nombre, activo=True).first()
         if usuario is not None:
-            cuenta = {'empresas': usuario.empresas_tuple}
+            cuenta = {'empresas': usuario.empresas_tuple, 'puede_invitar': usuario.puede_invitar}
     setattr(request, CLAVE_CACHE_CUENTA, cuenta)
     return cuenta
 
@@ -58,6 +58,12 @@ def tiene_acceso_total(request):
     """Dice si el usuario lo ve todo: todas las empresas y el mapa de flota."""
     cuenta = cuenta_actual(request)
     return cuenta is not None and cuenta.get('empresas') is None
+
+
+def puede_invitar(request):
+    """Dice si el usuario de la sesión puede dar de alta invitaciones."""
+    cuenta = cuenta_actual(request)
+    return cuenta is not None and bool(cuenta.get('puede_invitar'))
 
 
 class LoginRequeridoMiddleware:
@@ -82,6 +88,7 @@ class LoginRequeridoMiddleware:
             reverse('tracking:login'),
             reverse('tracking:login_antiguo'),
             reverse('tracking:home'),
+            reverse('tracking:primera_vez'),
         )
         if path in publicas:
             return True

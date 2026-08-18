@@ -6,6 +6,7 @@ import threading
 
 from django.contrib.auth.hashers import make_password
 from django.core.cache import cache
+from django.core.validators import EmailValidator, ValidationError
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -14,8 +15,12 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from . import api_client, services
 from .middleware import (CLAVE_LOGIN_NUEVO, CLAVE_SESION, CLAVE_USUARIO,
                          cuenta_actual, esta_autenticado, nombre_usuario,
-                         tiene_acceso_total)
+                         puede_invitar, tiene_acceso_total)
 from .models import DashboardUsuario
+
+_VALIDAR_EMAIL = EmailValidator(message='Escribe un correo válido.')
+
+EMPRESAS_INVITABLES = tuple(e for e in services.EMPRESAS if e != services.TAB_SIN_IDENTIFICAR)
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +150,121 @@ def logout_view(request):
     return redirect('tracking:login')
 
 
+def _clave_intentos_primera_vez(request):
+    """Clave de cache para los intentos fallidos en /primera-vez/, por IP."""
+    return f"primera_vez_intentos::{request.META.get('REMOTE_ADDR') or 'desconocida'}"
+
+
+def primera_vez_view(request):
+    """Activa una cuenta invitada: la persona pone su correo y elige clave.
+
+    Solo funciona si alguien con permiso para invitar ya dio de alta ese
+    correo desde /invitar/ (DashboardUsuario con clave_hash vacío). El
+    correo no identifica nada por sí solo — sin una invitación pendiente no
+    hay forma de crear una cuenta desde aquí.
+    """
+    if esta_autenticado(request):
+        return redirect('tracking:dashboard')
+
+    error = ''
+    correo = ''
+    if request.method == 'POST':
+        clave_intentos = _clave_intentos_primera_vez(request)
+        intentos = cache.get(clave_intentos, 0)
+        if intentos >= MAX_INTENTOS:
+            error = (f'Demasiados intentos fallidos. Espera {BLOQUEO_SEGUNDOS} '
+                     f'segundos y vuelve a intentarlo.')
+        else:
+            correo = (request.POST.get('correo') or '').strip().lower()
+            clave = request.POST.get('clave') or ''
+            confirmar = request.POST.get('confirmar') or ''
+            try:
+                _VALIDAR_EMAIL(correo)
+            except ValidationError:
+                error = 'Escribe un correo válido.'
+            if not error and len(clave) < 8:
+                error = 'La contraseña debe tener al menos 8 caracteres.'
+            if not error and clave != confirmar:
+                error = 'Las contraseñas no coinciden.'
+            if not error:
+                cuenta = DashboardUsuario.objects.filter(
+                    usuario=correo, activo=True, clave_hash='').first()
+                if cuenta is None:
+                    cache.set(clave_intentos, intentos + 1, BLOQUEO_SEGUNDOS)
+                    error = ('Ese correo no tiene una invitación pendiente, '
+                              'o la cuenta ya fue activada.')
+                else:
+                    cache.delete(clave_intentos)
+                    cuenta.set_clave(clave)
+                    cuenta.save()
+                    request.session.cycle_key()
+                    request.session[CLAVE_SESION] = True
+                    request.session[CLAVE_USUARIO] = cuenta.usuario
+                    request.session[CLAVE_LOGIN_NUEVO] = True
+                    return redirect('tracking:dashboard')
+
+    return render(request, 'tracking/primera_vez.html', {'error': error, 'correo': correo})
+
+
+def invitar_view(request):
+    """Da de alta una cuenta invitada, pendiente de que la reclamen.
+
+    Solo la ven las cuentas con `puede_invitar`. La lista de empresas que
+    se pueden ofrecer es la propia (o las tres reales, si el que invita
+    tiene acceso total) — nunca más de lo que el que invita ya ve.
+    """
+    if not esta_autenticado(request):
+        return redirect(f"{reverse('tracking:login')}?next={request.get_full_path()}")
+    if not puede_invitar(request):
+        return redirect('tracking:dashboard')
+
+    cuenta = DashboardUsuario.objects.filter(
+        usuario=nombre_usuario(request), activo=True).first()
+    if cuenta is None:
+        return redirect('tracking:dashboard')
+
+    empresas_disponibles = cuenta.empresas_tuple or EMPRESAS_INVITABLES
+
+    error = ''
+    exito = ''
+    if request.method == 'POST':
+        correo = (request.POST.get('correo') or '').strip().lower()
+        elegidas = [e for e in request.POST.getlist('empresas') if e in empresas_disponibles]
+        otorgar_invitar = request.POST.get('puede_invitar') == 'on'
+
+        try:
+            _VALIDAR_EMAIL(correo)
+        except ValidationError:
+            error = 'Escribe un correo válido.'
+        if not error and not elegidas:
+            error = 'Selecciona al menos una empresa.'
+        if not error and DashboardUsuario.objects.filter(usuario=correo).exists():
+            error = 'Ya existe una cuenta o invitación con ese correo.'
+        if not error:
+            DashboardUsuario.objects.create(
+                usuario=correo,
+                empresas=','.join(elegidas),
+                puede_invitar=otorgar_invitar,
+                invitado_por=cuenta,
+                activo=True,
+            )
+            exito = f'Invitación creada para {correo}.'
+
+    invitados = cuenta.invitados.order_by('-creado_en')
+    return render(request, 'tracking/invitar.html', {
+        'usuario': nombre_usuario(request),
+        'sesion_nueva': _sesion_nueva(request),
+        'empresas_disponibles': [
+            {'valor': e, 'etiqueta': services.ETIQUETA_EMPRESA[e]}
+            for e in empresas_disponibles
+        ],
+        'invitados': invitados,
+        'error': error,
+        'exito': exito,
+        'puede_invitar': True,
+    })
+
+
 def _sesion_nueva(request):
     """Consume la marca del login y dice si esta es la página de entrada.
 
@@ -170,6 +290,7 @@ def dashboard(request):
                   for t in services.TIPOS],
         'usuario': nombre_usuario(request),
         'sesion_nueva': _sesion_nueva(request),
+        'puede_invitar': puede_invitar(request),
     })
 
 
@@ -187,6 +308,7 @@ def fleet_dashboard(request):
     return render(request, 'tracking/fleet.html', {
         'usuario': nombre_usuario(request),
         'sesion_nueva': _sesion_nueva(request),
+        'puede_invitar': puede_invitar(request),
     })
 
 

@@ -19,6 +19,8 @@ urlpatterns = [
     path('entrar/', RedirectView.as_view(pattern_name='tracking:login',
                                          query_string=True), name='login_antiguo'),
     path('inicio/', views.home, name='home'),
+    path('primera-vez/', views.primera_vez_view, name='primera_vez'),
+    path('invitar/', views.invitar_view, name='invitar'),
     path('salir/', views.logout_view, name='logout'),
     path('dashboard/', views.dashboard, name='dashboard'),
     path('api/dashboard/', views.api_dashboard, name='api_dashboard'),

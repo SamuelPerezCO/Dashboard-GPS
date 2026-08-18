@@ -52,6 +52,7 @@
   }
   .acceso .ver-sitio:hover { background: var(--grid); color: var(--text-primary); }
   .acceso .ver-sitio svg { flex: none; }
+  .acceso .ver-sitio + .ver-sitio { margin-top: 10px; }
   .acceso .error {
     background: color-mix(in srgb, var(--critical) 12%, transparent);
     border: 1px solid var(--critical); border-radius: 7px;
@@ -84,6 +85,10 @@
   </form>
 
   <div class="separador">o</div>
+
+  <a class="ver-sitio" href="{% url 'tracking:primera_vez' %}">
+    ¿Primera vez aquí?
+  </a>
 
   <a class="ver-sitio" href="{% url 'tracking:home' %}">
     <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true">

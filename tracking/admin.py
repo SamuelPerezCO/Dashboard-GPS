@@ -20,7 +20,7 @@ class DashboardUsuarioForm(forms.ModelForm):
 
     class Meta:
         model = DashboardUsuario
-        fields = ('usuario', 'empresas', 'activo')
+        fields = ('usuario', 'empresas', 'activo', 'puede_invitar', 'invitado_por')
 
     def clean(self):
         cleaned = super().clean()
@@ -41,6 +41,6 @@ class DashboardUsuarioForm(forms.ModelForm):
 @admin.register(DashboardUsuario)
 class DashboardUsuarioAdmin(admin.ModelAdmin):
     form = DashboardUsuarioForm
-    list_display = ('usuario', 'empresas', 'activo', 'creado_en')
-    list_filter = ('activo',)
+    list_display = ('usuario', 'empresas', 'activo', 'puede_invitar', 'invitado_por', 'creado_en')
+    list_filter = ('activo', 'puede_invitar')
     search_fields = ('usuario',)
