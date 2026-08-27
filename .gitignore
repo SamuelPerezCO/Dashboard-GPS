@@ -6,6 +6,11 @@ db.sqlite3
 *.xls
 *.xlsx
 
+#Notas y reportes sueltos
+*.md
+*.csv
+!README.md
+
 #Folder
 venv
 __pycache__
