@@ -1,0 +1,46 @@
+{% extends 'tracking/base.html' %}
+{% block title %}Página no encontrada — Rastrelital{% endblock %}
+
+{% block barra %}{% endblock %}
+
+{% block guardia_pestana %}{% endblock %}
+
+{% block head %}
+<style>
+  .no-encontrada {
+    max-width: 420px; margin: 12vh auto 0; text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .no-encontrada .codigo {
+    font-size: 56px; font-weight: 700; letter-spacing: -0.02em;
+    color: var(--series-1); line-height: 1;
+  }
+  .no-encontrada h2 { font-size: 18px; font-weight: 650; margin: 6px 0 2px; }
+  .no-encontrada p {
+    color: var(--text-muted); font-size: 13px; margin: 0 0 22px; line-height: 1.5;
+  }
+  .no-encontrada .acciones { display: flex; gap: 10px; }
+  .no-encontrada a {
+    text-decoration: none; font-weight: 600; font-size: 13px;
+    border-radius: 7px; padding: 10px 18px;
+  }
+  .no-encontrada a.primaria { background: var(--series-1); color: #fff; }
+  .no-encontrada a.primaria:hover { filter: brightness(1.06); }
+  .no-encontrada a.secundaria {
+    color: var(--text-secondary); border: 1px solid var(--border);
+  }
+  .no-encontrada a.secundaria:hover { background: var(--grid); color: var(--text-primary); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="no-encontrada">
+  <div class="codigo">404</div>
+  <h2>Esta página no existe</h2>
+  <p>Revisa la dirección o vuelve a un lugar conocido.</p>
+  <div class="acciones">
+    <a class="primaria" href="{% url 'tracking:dashboard' %}">Ir al dashboard</a>
+    <a class="secundaria" href="{% url 'tracking:home' %}">Ver la página web</a>
+  </div>
+</div>
+{% endblock %}

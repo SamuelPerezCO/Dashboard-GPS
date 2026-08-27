@@ -53,6 +53,9 @@
   .acceso .ver-sitio:hover { background: var(--grid); color: var(--text-primary); }
   .acceso .ver-sitio svg { flex: none; }
   .acceso .ver-sitio + .ver-sitio { margin-top: 10px; }
+  /* TEMPORAL: el botón de acceso sin cuenta comparte estilo con .ver-sitio. */
+  .acceso button.ver-sitio { font: inherit; cursor: pointer; }
+  .acceso form + .ver-sitio { margin-top: 10px; }
   .acceso .error {
     background: color-mix(in srgb, var(--critical) 12%, transparent);
     border: 1px solid var(--critical); border-radius: 7px;
@@ -84,11 +87,20 @@
     <button type="submit">Entrar</button>
   </form>
 
-  <div class="separador">o</div>
-
-  <a class="ver-sitio" href="{% url 'tracking:primera_vez' %}">
-    ¿Primera vez aquí?
-  </a>
+  {# TEMPORAL: acceso instantáneo sin cuenta. Se borra con la vista #}
+  {# acceso_temporal, su URL y la entrada 'invitado' de settings. #}
+  <form method="post" action="{% url 'tracking:acceso_temporal' %}">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="separador">o</div>
+    <button type="submit" class="ver-sitio">
+      <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path d="M11 2 4 11.5h5L8.5 18l7-9.5h-5L11 2z"
+              stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+      Entrar sin cuenta (acceso temporal)
+    </button>
+  </form>
 
   <a class="ver-sitio" href="{% url 'tracking:home' %}">
     <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true">

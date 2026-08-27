@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+import secrets
 from pathlib import Path
 
 import dj_database_url
@@ -52,6 +53,27 @@ GPS_APIKEY = os.getenv('GPS_APIKEY', '')
 GPS_USERNAME = os.getenv('GPS_USERNAME', '')
 GPS_PASSWORD = os.getenv('GPS_PASSWORD', '')
 
+# Catálogo de cuentas del dashboard. `empresas: None` significa acceso total
+# (todas las pestañas y el mapa de flota).
+DASHBOARD_USUARIOS = {
+    'admin':   {'clave': os.getenv('DASHBOARD_CLAVE_ADMIN', 'Admin'),
+                'empresas': None},
+    'procaps': {'clave': os.getenv('DASHBOARD_CLAVE_PROCAPS', 'Procaps'),
+                'empresas': ('PROCAPS',)},
+    'ditar':   {'clave': os.getenv('DASHBOARD_CLAVE_DITAR', 'Ditar'),
+                'empresas': ('DITAR',)},
+    'relianz': {'clave': os.getenv('DASHBOARD_CLAVE_RELIANZ', 'relianz'),
+                'empresas': ('RELIANZ',)},
+}
+
+# TEMPORAL: cuenta del botón «acceso sin cuenta» del login. La clave es
+# aleatoria por arranque para que nadie entre con ella por el formulario;
+# el botón entra por su propia vista. Al borrar esta entrada, todas las
+# sesiones de invitado mueren solas. Buscar TEMPORAL para quitarlo todo.
+DASHBOARD_USUARIOS['invitado'] = {
+    'clave': secrets.token_urlsafe(32),
+    'empresas': None,
+}
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 
@@ -156,9 +178,9 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 #
-# Con DATABASE_URL puesto se usa Postgres (Supabase); ahí viven los usuarios
-# del dashboard (ver tracking.models.DashboardUsuario). Sin la variable queda
-# sqlite, que basta para desarrollo local sin credenciales de Supabase a mano.
+# Con DATABASE_URL puesto se usa Postgres (Supabase); ahí vive la flota (ver
+# tracking.models.FlotaVehiculo). Sin la variable queda sqlite, que basta para
+# desarrollo local sin credenciales de Supabase a mano.
 DATABASE_URL = os.getenv('DATABASE_URL', '')
 
 if DATABASE_URL:

@@ -10,29 +10,6 @@ from django.urls import reverse
 
 from . import services, views
 from .middleware import CLAVE_SESION, CLAVE_USUARIO
-from .models import DashboardUsuario
-from .models import DashboardUsuario
-
-# Las mismas cuentas y claves que antes vivían en settings.DASHBOARD_USUARIOS,
-# ahora como fixture para las pruebas que necesitan una sesión iniciada.
-CUENTAS_PRUEBA = {
-    'admin':   ('Admin', ''),
-    'procaps': ('Procaps', 'PROCAPS'),
-    'ditar':   ('Ditar', 'DITAR'),
-    'relianz': ('relianz', 'RELIANZ'),
-}
-
-
-def crear_usuarios_dashboard(*usuarios):
-    """Crea en la base de pruebas las cuentas pedidas (todas si no se indica ninguna)."""
-    creados = []
-    for nombre in (usuarios or CUENTAS_PRUEBA.keys()):
-        clave, empresas = CUENTAS_PRUEBA[nombre]
-        cuenta = DashboardUsuario(usuario=nombre, empresas=empresas)
-        cuenta.set_clave(clave)
-        cuenta.save()
-        creados.append(cuenta)
-    return creados
 
 
 def _alerta(equipo, hora, geocerca, fecha='2026-07-20', fuera=False):
@@ -468,41 +445,27 @@ class RangeSummaryTests(TestCase):
 
 
 class SinBaseDeDatosTests(TestCase):
-    """Entrar y ver el dashboard leen la cuenta, pero no escriben ninguna fila."""
-
-    @classmethod
-    def setUpTestData(cls):
-        crear_usuarios_dashboard('admin')
+    """Entrar y ver el dashboard no escribe una sola fila."""
 
     def test_la_sesion_va_en_cookie_firmada(self):
         self.assertEqual(settings.SESSION_ENGINE,
                          'django.contrib.sessions.backends.signed_cookies')
 
     def test_entrar_no_escribe_en_la_base_de_datos(self):
-        antes = DashboardUsuario.objects.count()
-        # Una sola lectura, para comprobar la clave.
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(0):
             r = self.client.post(reverse('tracking:login'),
                                  {'usuario': 'admin', 'clave': 'Admin'})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(DashboardUsuario.objects.count(), antes)
 
     def test_ver_el_dashboard_no_escribe_en_la_base_de_datos(self):
         self.client.post(reverse('tracking:login'),
                          {'usuario': 'admin', 'clave': 'Admin'})
-        antes = DashboardUsuario.objects.count()
-        # Una sola lectura por petición: cuenta_actual se cachea en el request.
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(0):
             self.client.get(reverse('tracking:dashboard'))
-        self.assertEqual(DashboardUsuario.objects.count(), antes)
 
 
 class PrecalentamientoTests(TestCase):
     """El precalentamiento que lanza el login."""
-
-    @classmethod
-    def setUpTestData(cls):
-        crear_usuarios_dashboard('admin')
 
     def setUp(self):
         cache.clear()
@@ -557,10 +520,6 @@ class PrecalentamientoTests(TestCase):
 
 class LoginTests(TestCase):
     """Quién entra, quién no y cómo se frena a quien insiste."""
-
-    @classmethod
-    def setUpTestData(cls):
-        crear_usuarios_dashboard('admin')
 
     def setUp(self):
         cache.clear()
@@ -663,10 +622,6 @@ class LoginTests(TestCase):
 class AccesoPorEmpresaTests(TestCase):
     """Cada usuario ve solo los viajes de su empresa, también en el JSON."""
 
-    @classmethod
-    def setUpTestData(cls):
-        crear_usuarios_dashboard()
-
     def setUp(self):
         cache.clear()
         self.login_url = reverse('tracking:login')
@@ -755,18 +710,16 @@ class AccesoPorEmpresaTests(TestCase):
 
     def test_quitar_un_usuario_del_catalogo_cierra_su_sesion(self):
         self.entrar('procaps', 'Procaps')
-        DashboardUsuario.objects.filter(usuario='procaps').update(activo=False)
-        r = self.client.get(reverse('tracking:dashboard'))
+        catalogo = {k: v for k, v in settings.DASHBOARD_USUARIOS.items()
+                    if k != 'procaps'}
+        with self.settings(DASHBOARD_USUARIOS=catalogo):
+            r = self.client.get(reverse('tracking:dashboard'))
         self.assertEqual(r.status_code, 302)
         self.assertIn(self.login_url, r.headers['Location'])
 
 
 class PestanaTests(TestCase):
     """Cerrar la pestaña obliga a escribir usuario y contraseña otra vez."""
-
-    @classmethod
-    def setUpTestData(cls):
-        crear_usuarios_dashboard('admin')
 
     def setUp(self):
         cache.clear()
@@ -824,10 +777,6 @@ class PestanaTests(TestCase):
 
 class DashboardTests(TestCase):
     """La página del dashboard y los errores de su endpoint JSON."""
-
-    @classmethod
-    def setUpTestData(cls):
-        crear_usuarios_dashboard('admin')
 
     def setUp(self):
         cache.clear()

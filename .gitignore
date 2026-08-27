@@ -1,0 +1,13 @@
+#Files
+.env
+db.sqlite3
+
+#Excel (reportes generados)
+*.xls
+*.xlsx
+
+#Folder
+venv
+__pycache__
+#Producción
+staticfiles
