@@ -822,6 +822,37 @@ class DashboardTests(TestCase):
         r = self.client.get(reverse('tracking:dashboard'))
         self.assertContains(r, 'id="sel-ruta"')
 
+    def test_marca_la_ocupacion_imposible_como_sospechosa(self):
+        """Candado de regresión: INT 7078 (291,89%, bug real de 2026-08) no
+        debe volver a dibujarse como una cifra confiable.
+
+        Una ocupación por encima de 100% dice que faltaron alertas de
+        geocerca, no que el bus fue sobrecupado (ver INFORME_ocupacion.md).
+        La gráfica no debe dejar que ese valor fije la escala del eje
+        —aplastaría el resto de las barras—, y tiene que marcarlo aparte en
+        vez de dibujarlo como un dato más. Como todo esto vive en el
+        JavaScript embebido de la plantilla (no hay runner de JS en el
+        proyecto), el candado verifica que el HTML servido siga trayendo el
+        umbral, el aviso y la clase que lo dibujan distinto.
+        """
+        r = self.client.get(reverse('tracking:dashboard'))
+        html = r.content.decode()
+        # El umbral de lo imposible, y que de verdad se use para filtrar la
+        # escala del eje y no solo para decorar.
+        self.assertIn('UMBRAL_OCUPACION_IMPOSIBLE = 100', html)
+        self.assertIn('avisos[i] != null', html)
+        # La barra sospechosa se distingue con su propia clase, no con el
+        # mismo azul de siempre.
+        self.assertIn('bar-sospechoso', html)
+        self.assertIn("clase = sospechoso ? 'bar bar-sospechoso' : 'bar'", html)
+        # El valor real (291,89%) se sigue mostrando: no se oculta ni se
+        # recorta a 100.
+        self.assertIn('fmtDec(values[i], decimales)', html)
+        self.assertNotIn('Math.min(v, 100)', html)
+        # La etiqueta del eje ya no se recorta («91,89%» en vez de
+        # «291,89%»): el margen izquierdo se ensanchó de 38 a 52.
+        self.assertIn('const pl = 52, pr = 12, pt = 10, pb = 74;', html)
+
     def test_la_ruta_llega_a_services(self):
         with patch.object(services, 'range_summary', return_value={}) as resumen:
             r = self.client.get(reverse('tracking:api_dashboard'), {'ruta': ' RUTA 3 '})

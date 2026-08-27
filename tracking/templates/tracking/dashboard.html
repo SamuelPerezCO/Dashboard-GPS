@@ -108,8 +108,20 @@
   .viz .pt    { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 1.5; }
   .viz .bar   { fill: var(--series-1); }
 
+  /* Ocupación por encima de ~100%: el denominador (servicios detectados)
+     no es creíble, no es que el bus haya ido sobrecupado. La barra toca el
+     tope del panel en vez de estirar la escala, y el color avisa que la
+     cifra real (visible en la etiqueta y el tooltip) no se puede tomar
+     al pie de la letra. */
+  .viz .bar-sospechoso { fill: var(--critical); }
+  .viz .lbl-aviso { font-size: 11px; fill: var(--critical); }
+
   .viz .serie-a { fill: var(--series-1); }
   .viz .serie-b { fill: var(--series-2); }
+
+  #tooltip .t-row.aviso { color: var(--critical); font-weight: 600; margin-top: 2px; }
+
+  .marca-sospechoso { color: var(--critical); cursor: help; font-weight: 700; }
 
   .leyenda {
     display: flex; flex-wrap: wrap; gap: 16px;
@@ -277,6 +289,28 @@
 
   const DECIMALES_OCUPACION = 2;
 
+  // Por encima de esto la ocupación es físicamente imposible (más pasajeros
+  // que asientos por viaje): el mismo umbral que ya usa
+  // `auditar_servicios.py` para marcar una unidad como sospechosa. Cuando se
+  // pasa, el problema casi siempre es que faltaron alertas de geocerca, no
+  // que el bus haya ido sobrecupado.
+  const UMBRAL_OCUPACION_IMPOSIBLE = 100;
+
+  // Días activos por interno, contando un día como activo si el bus
+  // registró al menos una timbrada. Es el mismo cálculo que hace
+  // `auditar_servicios.py` a partir del detalle diario, reproducido aquí
+  // porque `range_summary` no manda ese número por bus.
+  function diasActivosPorInterno() {
+    const mapa = new Map();
+    (datos.detalle.internos || []).forEach(interno => mapa.set(interno, 0));
+    (datos.detalle.filas || []).forEach(f => {
+      datos.detalle.internos.forEach((interno, idx) => {
+        if (f.valores[idx]) mapa.set(interno, (mapa.get(interno) || 0) + 1);
+      });
+    });
+    return mapa;
+  }
+
   const hoy = () => new Date().toLocaleDateString('sv-SE');
 
   function fijarTopeHoy() {
@@ -289,16 +323,25 @@
     inputDesde.value <= hoy() && inputHasta.value <= hoy();
 
   function pintarGrafica(cont, labels, values, tipo, nombreSerie, unidad = '',
-                         decimales = 0) {
+                         decimales = 0, avisos = null) {
     const n = labels.length;
     if (!n) { cont.innerHTML = '<p class="muted">Sin vehículos.</p>'; return; }
 
     const ANCHO_MIN_POR_BUS = 30;
-    const pl = 38, pr = 12, pt = 10, pb = 74;
+    const pl = 52, pr = 12, pt = 10, pb = 74;
     const H = 320;
     const W = Math.max(cont.clientWidth, 320, n * ANCHO_MIN_POR_BUS + pl + pr);
     const iw = W - pl - pr, ih = H - pt - pb;
-    const max = Math.max(1, ...values);
+    // Un valor con aviso (p. ej. ocupación imposible) no debe fijar la escala:
+    // si lo hiciera, un solo caso raro aplastaría el resto de las barras
+    // contra el piso. La escala sale de los valores confiables; los que
+    // tienen aviso se dibujan igual, con la barra tocando el tope del
+    // panel para marcar que se salen de rango, pero su cifra real se ve
+    // completa en la etiqueta y en el tooltip.
+    const confiables = avisos && values.some((v, i) => avisos[i] != null)
+      ? values.filter((v, i) => avisos[i] == null)
+      : values;
+    const max = Math.max(1, ...(confiables.length ? confiables : values));
     const slot = iw / n;
     const xLinea = i => pl + (n === 1 ? iw / 2 : i * iw / (n - 1));
     const xBarra = i => pl + i * slot;
@@ -326,8 +369,17 @@
       });
     } else {
       values.forEach((v, i) => {
-        const bh = v > 0 ? Math.max(ih * v / max, 2) : 0;
-        s += `<rect class="bar" x="${xBarra(i) + 1}" y="${y(0) - bh}" width="${Math.max(slot - 2, 1.5)}" height="${bh}" rx="2"/>`;
+        const sospechoso = Boolean(avisos && avisos[i] != null);
+        const bh = v > 0 ? Math.max(Math.min(ih * v / max, ih), 2) : 0;
+        const clase = sospechoso ? 'bar bar-sospechoso' : 'bar';
+        s += `<rect class="${clase}" x="${xBarra(i) + 1}" y="${y(0) - bh}" width="${Math.max(slot - 2, 1.5)}" height="${bh}" rx="2"/>`;
+        if (sospechoso) {
+          // Nunca más cerca del borde superior del viewBox que 12px, aunque
+          // la barra esté topada en ih: si no, el símbolo se recorta igual
+          // que el eje que este mismo cambio vino a arreglar.
+          const yAviso = Math.max(y(0) - bh - 4, 12);
+          s += `<text class="lbl-aviso" x="${xBarra(i) + slot / 2}" y="${yAviso}" text-anchor="middle">⚠</text>`;
+        }
         s += `<rect class="hover" data-i="${i}" x="${xBarra(i)}" y="${pt}" width="${slot}" height="${ih}" fill="transparent"/>`;
       });
     }
@@ -336,9 +388,11 @@
 
     cont.querySelectorAll('.hover').forEach(r => {
       const i = +r.dataset.i;
+      const aviso = avisos && avisos[i];
       r.addEventListener('mouseenter', ev => tooltipShow(
         `<div class="t-title">${labels[i]}</div>
-         <div class="t-row">${nombreSerie}: <b>${fmtDec(values[i], decimales)}${unidad}</b></div>`, ev));
+         <div class="t-row">${nombreSerie}: <b>${fmtDec(values[i], decimales)}${unidad}</b></div>` +
+        (aviso ? `<div class="t-row aviso">⚠ ${aviso}</div>` : ''), ev));
       r.addEventListener('mousemove', tooltipMove);
       r.addEventListener('mouseleave', tooltipHide);
     });
@@ -533,10 +587,21 @@
                   datos.vehiculos.map(v => v.timbradas), 'linea', 'Timbradas');
 
     const conCap = datos.vehiculos.filter(v => v.ocupacion != null);
+    const diasActivos = diasActivosPorInterno();
+    const sospechososOcupacion = new Set();
+    const avisosOcupacion = conCap.map(v => {
+      if (v.ocupacion <= UMBRAL_OCUPACION_IMPOSIBLE) return null;
+      sospechososOcupacion.add(v.interno);
+      const activos = diasActivos.get(v.interno) || 0;
+      return `Ocupación no confiable: solo ${fmt(v.servicios)} servicio` +
+             `${v.servicios === 1 ? '' : 's'} detectado${v.servicios === 1 ? '' : 's'} en ` +
+             `${fmt(activos)} días activos. Es más probable que falten alertas de ` +
+             `geocerca a que el bus haya ido sobrecupado.`;
+    });
     pintarGrafica(document.getElementById('chart-ocupacion'),
                   conCap.map(v => v.interno),
                   conCap.map(v => v.ocupacion), 'barras', 'Ocupación real', '%',
-                  DECIMALES_OCUPACION);
+                  DECIMALES_OCUPACION, avisosOcupacion);
 
     const conServ = datos.vehiculos.filter(v => v.capacidad_total != null);
     pintarGrafica(document.getElementById('chart-capacidad'),
@@ -550,7 +615,12 @@
     ]);
 
     document.querySelector('#tabla-detalle thead').innerHTML =
-      '<tr><th>Fecha</th>' + datos.detalle.internos.map(p => `<th class="num">${p}</th>`).join('') + '</tr>';
+      '<tr><th>Fecha</th>' + datos.detalle.internos.map(p => {
+        const marca = sospechososOcupacion.has(p)
+          ? ` <span class="marca-sospechoso" title="Ocupación calculada no confiable: pocos servicios detectados frente a los días activos. Ver «Ocupación real por vehículo».">⚠</span>`
+          : '';
+        return `<th class="num">${p}${marca}</th>`;
+      }).join('') + '</tr>';
     document.querySelector('#tabla-detalle tbody').innerHTML =
       datos.detalle.filas.map(f => `
         <tr>
