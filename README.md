@@ -183,39 +183,78 @@ proyecto.
 
 El dashboard entero (páginas y endpoints JSON) exige iniciar sesión en la raíz
 del sitio. El login y la portada son las únicas páginas que se ven sin sesión.
-No hay usuarios en base de datos: **el catálogo de cuentas es
-`DASHBOARD_USUARIOS` en `config/settings.py`**, y ahí se agregan y se quitan.
 Tras 5 intentos fallidos desde la misma IP el login se bloquea 60 segundos.
 `/admin/` conserva su propio login de Django.
 
-### Cuentas y qué ve cada una
-
-**Se entra con el correo completo, no con un nombre de usuario.** Los correos
-de aquí abajo son los que trae el código por defecto, para desarrollo; en
-producción cada uno se cambia por el correo real de la persona con la variable
-`DASHBOARD_CORREO_*` correspondiente, sin tocar el código.
-
-**Puede ser cualquier correo**: no hay dominio privilegiado y `rastrelital.com`
-no tiene nada de especial. `jefe@procaps.com.co`, `samuel@gmail.com` o
-`coordinacion@transportes-del-caribe.com.co` sirven igual. Lo único que se
-exige es que lleve `@`, que es lo que hace honesto el aviso del login cuando
-alguien escribe todavía un nombre corto.
-
-| Correo (por defecto) | Contraseña | Ve los viajes de | Mapa `/mapa/` |
-|---|---|---|---|
-| `admin@rastrelital.com` | `Admin` | Todas las empresas | Sí |
-| `procaps@rastrelital.com` | `Procaps` | PROCAPS + Sin identificar | No |
-| `ditar@rastrelital.com` | `Ditar` | DITAR + Sin identificar | No |
-| `relianz@rastrelital.com` | `relianz` | RELIANZ + Sin identificar | No |
-
-El correo **no** distingue mayúsculas ni espacios de sobra
-(`  Procaps@Rastrelital.com ` = `procaps@rastrelital.com`); la contraseña
-**sí**. En la barra del dashboard se muestra lo que va antes del `@`, y el
-correo completo queda en el `title` de esa píldora.
+**Se entra con el correo completo**, que no distingue mayúsculas ni espacios de
+sobra (`  Jefe@Procaps.com.co ` = `jefe@procaps.com.co`); la contraseña **sí**
+distingue. Puede ser cualquier correo: no hay dominio privilegiado. En la barra
+del dashboard se muestra lo que va antes del `@`, y el correo completo queda en
+el `title` de esa píldora.
 
 > Los nombres cortos de antes (`admin`, `procaps`, `ditar`, `relianz`) **ya no
 > sirven para entrar**. Quien escriba uno recibe un aviso de que ahora va el
 > correo completo, y ese intento cuenta igual para el bloqueo por IP.
+
+### Dar de alta a una persona
+
+Las cuentas son filas de `tracking.models.DashboardUsuario`, **una por
+persona**, y se administran desde `/admin/` sin tocar el código ni volver a
+desplegar:
+
+> **/admin/ → Usuarios del dashboard → Agregar**
+>
+> | Campo | Qué es |
+> |---|---|
+> | Correo | Con el que entra. |
+> | Nombre | Opcional, para saber de quién es la cuenta. |
+> | Clave | Se escribe en claro una vez y se guarda **hasheada**; ni el admin ni la base la vuelven a mostrar. Al editar, en blanco = conserva la que tiene. |
+> | Acceso total | Ve todas las empresas y además el mapa de flota. |
+> | Empresas | Casillas. Se ignora si tiene acceso total. |
+> | Activo | Al desmarcarlo la cuenta deja de entrar, y **la sesión que tuviera abierta se cierra sola en la siguiente página**. |
+
+Son dos campos (`acceso_total` y `empresas`) y no uno porque «sin empresas
+marcadas» tiene que significar *no ve nada*. Si el vacío diera acceso total,
+una cuenta a la que se le olvidó marcar la empresa acabaría viéndolo todo.
+
+Para la primera cuenta —cuando todavía no hay superusuario de Django con el
+que abrir `/admin/`— está el comando de consola:
+
+```bash
+python manage.py createsuperuser              # para entrar a /admin/
+python manage.py crear_usuario_dashboard samuel@rastrelital.com --acceso-total
+python manage.py crear_usuario_dashboard jefe@procaps.com.co     --nombre "Jefe de logística" --empresas PROCAPS
+python manage.py crear_usuario_dashboard alguien@x.com --desactivar
+```
+
+Sin `--clave` la pide por consola sin mostrarla, que es mejor que dejarla
+escrita en el historial del shell.
+
+### El acceso de emergencia
+
+`DASHBOARD_USUARIOS` en `config/settings.py` sigue existiendo, pero **ya no es
+donde viven las cuentas**: es la puerta de atrás para dos casos, que la base de
+datos no conteste y que todavía no haya ninguna cuenta creada. El Postgres es
+remoto y a veces no responde; si el login dependiera solo de él, una caída
+dejaría a todo el mundo fuera del sitio.
+
+En desarrollo trae cuentas por defecto (`admin@rastrelital.com` / `Admin` y
+compañía) para no tener que configurar nada. **En producción, con
+`DJANGO_DEBUG` apagado, solo existe la cuenta cuyas dos variables estén puestas
+a mano**, así que las claves escritas en el código —que está en un repositorio
+público— no abren nada en el servidor:
+
+```ini
+DASHBOARD_CORREO_ADMIN=rescate@rastrelital.com
+DASHBOARD_CLAVE_ADMIN=...
+```
+
+Las dos van juntas: con una sola, la otra mitad de la cuenta se quedaría con el
+valor de ejemplo del código, y `_catalogo_de` se planta al arrancar antes que
+dejar eso pasar. Una cuenta de la tabla **le gana** a la de settings con el
+mismo correo, para que cambiar una clave en `/admin/` sirva de algo.
+
+### Qué ve cada cuenta
 
 **Los viajes sin empresa se muestran en todas las ventanas.** La pestaña «Sin
 identificar» se le agrega a todo usuario, porque ahí cae lo que no se pudo
@@ -237,18 +276,6 @@ Ocultar la pestaña no protege nada por sí solo: la URL del JSON se puede
 escribir a mano. Por eso el techo del usuario se le pasa siempre a
 `services.range_summary`.
 
-Para agregar una cuenta nueva basta con una línea en `_CUENTAS`, la tabla de
-la que sale `DASHBOARD_USUARIOS`:
-
-```python
-# (sufijo de las variables, correo por defecto, clave por defecto, empresas)
-('NUEVO', 'nuevo@rastrelital.com', 'clave', ('PROCAPS', 'DITAR')),
-#                                            None = acceso total
-```
-
-Con eso la cuenta queda configurable desde el `.env` con
-`DASHBOARD_CORREO_NUEVO` y `DASHBOARD_CLAVE_NUEVO`.
-
 **La sesión dura lo que dure la pestaña.** Al cerrarla (o cerrar el navegador)
 hay que volver a escribir correo y contraseña; recargar o navegar dentro de la
 misma pestaña no molesta. Son dos piezas: la cookie va sin fecha de vencimiento
@@ -268,7 +295,7 @@ antes de que la persona elija un rango.
 python manage.py test
 ```
 
-125 pruebas que **no tocan la red**: el API se simula con `mock`, así que
+157 pruebas que **no tocan la red**: el API se simula con `mock`, así que
 corren sin credenciales y en un par de segundos. El catálogo de cuentas también
 va fijado en la suite (`CATALOGO` en `tracking/tests.py`), así que las pruebas
 no dependen de lo que cada `.env` tenga escrito.
@@ -320,7 +347,8 @@ tracking/
 ```
 
 El dashboard de mapa en vivo existe en `/mapa/` pero no está en el menú, y es
-solo para `admin`: muestra la flota completa, que no está repartida por empresa.
+solo para las cuentas con acceso total: muestra la flota completa, que no está
+repartida por empresa.
 
 ## Despliegue (Render)
 
@@ -341,12 +369,11 @@ python manage.py collectstatic --no-input
 La primera vez, además:
 
 ```bash
-# Migra las 4 cuentas históricas (admin/procaps/ditar/relianz) a la base
-# nueva. Idempotente: se puede volver a correr sin duplicar nada.
-python manage.py seed_dashboard_usuarios
-
-# Para poder entrar a /admin/ y gestionar DashboardUsuario desde ahí.
+# Para poder entrar a /admin/ y gestionar las cuentas desde ahí.
 python manage.py createsuperuser
+
+# La primera cuenta del dashboard, para no depender del acceso de emergencia.
+python manage.py crear_usuario_dashboard samuel@rastrelital.com --acceso-total
 ```
 
 De ahí en adelante, las cuentas del dashboard se crean, editan y desactivan
@@ -361,7 +388,7 @@ Variables de entorno que hay que poner en Render:
 | `DJANGO_SECRET_KEY` | Firma la cookie de sesión. Si falta, se usa la clave de ejemplo que está en el repo y **cualquiera podría fabricarse una sesión válida**. |
 | `DATABASE_URL` | Conexión a Postgres de Supabase (usa el "Transaction pooler", puerto 6543). Sin ella cae a sqlite, que en Render se pierde en cada redeploy. |
 | `GPS_APIKEY`, `GPS_USERNAME`, `GPS_PASSWORD` | Acceso al WebService. |
-| `DASHBOARD_CLAVE_ADMIN`, `DASHBOARD_CLAVE_PROCAPS`, `DASHBOARD_CLAVE_DITAR`, `DASHBOARD_CLAVE_RELIANZ` | Solo las lee `seed_dashboard_usuarios`, una vez. Después de correrlo se pueden quitar: las claves reales ya viven hasheadas en la base. |
+| `DASHBOARD_CORREO_ADMIN` + `DASHBOARD_CLAVE_ADMIN` | Opcionales, y van juntas: el acceso de emergencia para cuando la base no conteste. Sin ellas, con `DJANGO_DEBUG=0` no hay ninguna cuenta de settings y se entra solo con las de la tabla. |
 
 ## Licencia
 

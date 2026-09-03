@@ -1,14 +1,23 @@
 """Sesión del dashboard: quién entró y qué puede ver.
 
-No hay usuarios en base de datos; el catálogo es DASHBOARD_USUARIOS en
-settings, indexado por el correo con el que cada quien entra, y los
-permisos se releen de ahí en cada petición para que quitarle el acceso a
-alguien surta efecto de inmediato.
+Las cuentas son filas de tracking.models.DashboardUsuario y se administran
+desde /admin/, sin redeploy. settings.DASHBOARD_USUARIOS sigue existiendo,
+pero ya solo como acceso de emergencia: si la base de datos no contesta,
+alguien tiene que poder entrar igual.
+
+Los permisos se releen en cada petición, así que desmarcar «activo» o
+cambiarle las empresas a alguien surte efecto de inmediato, sin esperar a
+que cierre sesión.
 """
 
+import logging
+
 from django.conf import settings
+from django.db import DatabaseError
 from django.shortcuts import redirect
 from django.urls import reverse
+
+logger = logging.getLogger(__name__)
 
 CLAVE_SESION = 'dashboard_autenticado'
 
@@ -31,13 +40,40 @@ def nombre_visible(request):
     return nombre_usuario(request).split('@')[0]
 
 
+def usuario_en_bd(correo):
+    """La cuenta activa con ese correo, o None si no hay ninguna.
+
+    Se traga los errores de base de datos a propósito. El dashboard corre
+    contra un Postgres remoto que a veces no contesta, y si esta consulta
+    dejara escapar la excepción, una caída de la base sacaría a todo el
+    mundo del sitio en vez de solo impedir cuentas nuevas: devolviendo None
+    el acceso de emergencia de settings sigue funcionando.
+    """
+    if not correo:
+        return None
+    # Importada aquí y no arriba: el middleware se carga antes que las apps.
+    from .models import DashboardUsuario
+    try:
+        return DashboardUsuario.objects.filter(correo=correo,
+                                               activo=True).first()
+    except DatabaseError:
+        logger.exception('No se pudieron consultar las cuentas del dashboard')
+        return None
+
+
 def cuenta_actual(request):
-    """Ficha del usuario en el catálogo.
+    """Ficha del usuario de la sesión: de la tabla, o del acceso de emergencia.
 
     Returns:
         None si no hay sesión, o si al usuario ya le quitaron el acceso.
     """
-    return settings.DASHBOARD_USUARIOS.get(nombre_usuario(request))
+    correo = nombre_usuario(request)
+    if not correo:
+        return None
+    usuario = usuario_en_bd(correo)
+    if usuario is not None:
+        return usuario.ficha
+    return settings.DASHBOARD_USUARIOS.get(correo)
 
 
 def esta_autenticado(request):

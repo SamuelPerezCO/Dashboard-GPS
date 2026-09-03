@@ -2,17 +2,24 @@
 
 import os
 from datetime import date, datetime
+from io import StringIO
 from unittest.mock import patch
 
 from config.settings import _catalogo_de
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.db import OperationalError, connection
+from django.test.utils import CaptureQueriesContext
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from . import services, views
 from .middleware import CLAVE_SESION, CLAVE_USUARIO
+from .admin import DashboardUsuarioForm
+from .models import DashboardUsuario
 
 # Correos y catálogo fijos para las pruebas. El de settings sale del entorno
 # (DASHBOARD_CORREO_* y DASHBOARD_CLAVE_*), y la suite no puede depender de lo
@@ -33,6 +40,12 @@ CATALOGO = {
 }
 
 con_catalogo = override_settings(DASHBOARD_USUARIOS=CATALOGO)
+
+# PBKDF2 tarda a propósito (~150 ms por clave) y eso se nota cuando la suite
+# crea cuentas de prueba. Para lo que se comprueba aquí da igual el algoritmo:
+# lo que importa es que la clave se guarde hasheada y que se verifique bien.
+rapido_al_hashear = override_settings(
+    PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
 
 
 def _alerta(equipo, hora, geocerca, fecha='2026-07-20', fuera=False):
@@ -564,23 +577,47 @@ class RangeSummaryTests(TestCase):
 
 @con_catalogo
 class SinBaseDeDatosTests(TestCase):
-    """Entrar y ver el dashboard no escribe una sola fila."""
+    """Lo que sigue sin depender de la base, ahora que las cuentas sí.
+
+    Las cuentas viven en DashboardUsuario desde que se administran por
+    /admin/, así que entrar la consulta: el candado de «cero consultas» que
+    había aquí dejó de describir el diseño. Lo que sí se sostiene es que la
+    sesión va en una cookie firmada —no hay tabla de sesiones que
+    escribir— y que una base caída no deja a nadie fuera, porque el acceso
+    de emergencia de settings sigue abriendo.
+    """
 
     def test_la_sesion_va_en_cookie_firmada(self):
         self.assertEqual(settings.SESSION_ENGINE,
                          'django.contrib.sessions.backends.signed_cookies')
 
-    def test_entrar_no_escribe_en_la_base_de_datos(self):
-        with self.assertNumQueries(0):
+    def test_entrar_y_ver_el_dashboard_no_escriben_ninguna_fila(self):
+        """Consultar las cuentas sí; escribir, nada."""
+        with CaptureQueriesContext(connection) as consultas:
             r = self.client.post(reverse('tracking:login'),
                                  {'correo': ADMIN, 'clave': 'Admin'})
-        self.assertEqual(r.status_code, 302)
-
-    def test_ver_el_dashboard_no_escribe_en_la_base_de_datos(self):
-        self.client.post(reverse('tracking:login'),
-                         {'correo': ADMIN, 'clave': 'Admin'})
-        with self.assertNumQueries(0):
             self.client.get(reverse('tracking:dashboard'))
+        self.assertEqual(r.status_code, 302)
+        escrituras = [c['sql'] for c in consultas.captured_queries
+                      if not c['sql'].lstrip().upper().startswith('SELECT')]
+        self.assertEqual(escrituras, [])
+
+    def test_una_base_caida_no_cierra_el_acceso_de_emergencia(self):
+        """Para esto existe la cuenta de settings.
+
+        El Postgres es remoto y a veces no contesta. Si esa consulta dejara
+        escapar la excepción, una caída de la base sacaría del sitio a todo
+        el mundo en vez de solo impedir las cuentas nuevas.
+        """
+        with patch.object(DashboardUsuario.objects, 'filter',
+                          side_effect=OperationalError('sin conexión')):
+            with self.assertLogs('tracking.middleware', level='ERROR'):
+                r = self.client.post(reverse('tracking:login'),
+                                     {'correo': ADMIN, 'clave': 'Admin'})
+                self.assertEqual(r.status_code, 302)
+                self.assertEqual(
+                    self.client.get(reverse('tracking:dashboard')).status_code,
+                    200)
 
 
 @con_catalogo
@@ -1131,7 +1168,7 @@ class CatalogoDeCuentasTests(TestCase):
                   if not k.startswith('DASHBOARD_')}
         limpio.update(entorno)
         with patch.dict(os.environ, limpio, clear=True):
-            return _catalogo_de(self.CUENTAS)
+            return _catalogo_de(self.CUENTAS, con_defectos=True)
 
     def test_la_configuracion_buena_arma_el_catalogo(self):
         catalogo = self.armar()
@@ -1150,22 +1187,55 @@ class CatalogoDeCuentasTests(TestCase):
         for vacio in ('', '   '):
             with self.assertRaisesMessage(ImproperlyConfigured,
                                           'DASHBOARD_CORREO_ADMIN'):
-                self.armar(DASHBOARD_CORREO_ADMIN=vacio)
+                self.armar(DASHBOARD_CORREO_ADMIN=vacio,
+                           DASHBOARD_CLAVE_ADMIN='Cl4ve')
 
     def test_rechaza_lo_que_no_es_un_correo(self):
         """Si no lleva '@', el aviso del login mentiría: la cuenta existe."""
         with self.assertRaisesMessage(ImproperlyConfigured, 'no es un correo'):
-            self.armar(DASHBOARD_CORREO_ADMIN='admin')
+            self.armar(DASHBOARD_CORREO_ADMIN='admin',
+                       DASHBOARD_CLAVE_ADMIN='Cl4ve')
 
     def test_rechaza_el_correo_repetido(self):
         """Gana el último: la primera cuenta desaparece y cambian los permisos."""
         with self.assertRaisesMessage(ImproperlyConfigured, 'repite el correo'):
             self.armar(DASHBOARD_CORREO_ADMIN='jefe@procaps.com',
-                       DASHBOARD_CORREO_PROCAPS='jefe@procaps.com')
+                       DASHBOARD_CLAVE_ADMIN='Cl4ve',
+                       DASHBOARD_CORREO_PROCAPS='jefe@procaps.com',
+                       DASHBOARD_CLAVE_PROCAPS='Otra')
 
     def test_rechaza_la_clave_en_blanco(self):
         with self.assertRaisesMessage(ImproperlyConfigured, 'sin escribir nada'):
-            self.armar(DASHBOARD_CLAVE_ADMIN='')
+            self.armar(DASHBOARD_CORREO_ADMIN='admin@rastrelital.com',
+                       DASHBOARD_CLAVE_ADMIN='')
+
+    def test_rechaza_media_cuenta_configurada(self):
+        """Con una sola variable, la otra mitad se quedaría con el ejemplo.
+
+        Y el ejemplo está en un repositorio público, así que configurar solo
+        el correo dejaría la cuenta abierta con la clave que todos ven.
+        """
+        for a_medias in ({'DASHBOARD_CORREO_ADMIN': 'jefe@procaps.com'},
+                         {'DASHBOARD_CLAVE_ADMIN': 'Cl4ve'}):
+            with self.assertRaisesMessage(ImproperlyConfigured, 'van juntas'):
+                self.armar(**a_medias)
+
+    def test_en_produccion_no_hay_cuentas_sin_configurar(self):
+        """Sin `con_defectos`, las claves del código no abren nada.
+
+        Es lo que separa desarrollo de producción: en el servidor, el acceso
+        de emergencia existe solo si alguien lo configuró a propósito.
+        """
+        limpio = {k: v for k, v in os.environ.items()
+                  if not k.startswith('DASHBOARD_')}
+        with patch.dict(os.environ, limpio, clear=True):
+            self.assertEqual(_catalogo_de(self.CUENTAS, con_defectos=False), {})
+
+        limpio['DASHBOARD_CORREO_ADMIN'] = 'rescate@rastrelital.com'
+        limpio['DASHBOARD_CLAVE_ADMIN'] = 'Cl4ve'
+        with patch.dict(os.environ, limpio, clear=True):
+            catalogo = _catalogo_de(self.CUENTAS, con_defectos=False)
+        self.assertEqual(list(catalogo), ['rescate@rastrelital.com'])
 
 
 @con_catalogo
@@ -1216,9 +1286,11 @@ class CorreosDeCualquierFormaTests(TestCase):
                 limpio = {k: v for k, v in os.environ.items()
                           if not k.startswith('DASHBOARD_')}
                 limpio['DASHBOARD_CORREO_ADMIN'] = f'  {correo.upper()}  '
+                limpio['DASHBOARD_CLAVE_ADMIN'] = 'Cl4ve'
                 with patch.dict(os.environ, limpio, clear=True):
                     catalogo = _catalogo_de(
-                        (('ADMIN', 'x@y.com', 'Admin', None),))
+                        (('ADMIN', 'x@y.com', 'Admin', None),),
+                        con_defectos=True)
                 self.assertEqual(list(catalogo), [correo])
 
     def test_la_barra_escapa_el_correo(self):
@@ -1232,3 +1304,248 @@ class CorreosDeCualquierFormaTests(TestCase):
         html = r.content.decode()
         self.assertNotIn(hostil, html)
         self.assertIn('&lt;script&gt;', html)
+
+
+@rapido_al_hashear
+@override_settings(DASHBOARD_USUARIOS={})
+class CuentasEnLaBaseTests(TestCase):
+    """Las cuentas de /admin/: una fila por persona, con la clave hasheada.
+
+    El catálogo de settings va vacío a propósito, para que lo que se pruebe
+    aquí sea la tabla y no el acceso de emergencia.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.login_url = reverse('tracking:login')
+        parche = patch.object(views, '_lanzar_precalentamiento',
+                              return_value=False)
+        parche.start()
+        self.addCleanup(parche.stop)
+
+    def crear(self, correo='jefe@procaps.com.co', clave='Cl4veLarga',
+              empresas='PROCAPS', acceso_total=False, activo=True):
+        usuario = DashboardUsuario(correo=correo, empresas=empresas,
+                                   acceso_total=acceso_total, activo=activo)
+        usuario.set_clave(clave)
+        usuario.save()
+        return usuario
+
+    def entrar(self, correo, clave):
+        return self.client.post(self.login_url, {'correo': correo,
+                                                 'clave': clave})
+
+    def test_una_cuenta_de_la_tabla_entra(self):
+        self.crear()
+        r = self.entrar('jefe@procaps.com.co', 'Cl4veLarga')
+        self.assertRedirects(r, reverse('tracking:dashboard'),
+                             fetch_redirect_response=False)
+        self.assertEqual(self.client.session.get(CLAVE_USUARIO),
+                         'jefe@procaps.com.co')
+
+    def test_la_clave_no_se_guarda_en_claro(self):
+        """Es la diferencia con el catálogo de settings, que la guarda tal cual."""
+        usuario = self.crear(clave='Cl4veLarga')
+        self.assertNotIn('Cl4veLarga', usuario.clave_hash)
+        self.assertTrue(usuario.check_clave('Cl4veLarga'))
+        self.assertFalse(usuario.check_clave('otra'))
+
+    def test_la_clave_equivocada_no_entra(self):
+        self.crear()
+        self.entrar('jefe@procaps.com.co', 'otra')
+        self.assertFalse(self.client.session.get(CLAVE_SESION))
+
+    def test_el_correo_se_normaliza_al_guardar(self):
+        usuario = self.crear(correo='  JEFE@Procaps.COM.CO  ')
+        self.assertEqual(usuario.correo, 'jefe@procaps.com.co')
+        self.entrar('JEFE@PROCAPS.COM.CO', 'Cl4veLarga')
+        self.assertTrue(self.client.session.get(CLAVE_SESION))
+
+    def test_una_cuenta_inactiva_no_entra(self):
+        self.crear(activo=False)
+        self.entrar('jefe@procaps.com.co', 'Cl4veLarga')
+        self.assertFalse(self.client.session.get(CLAVE_SESION))
+
+    def test_desactivar_cierra_la_sesion_que_ya_estaba_abierta(self):
+        """Los permisos se releen en cada petición, para que esto pase."""
+        usuario = self.crear()
+        self.entrar('jefe@procaps.com.co', 'Cl4veLarga')
+        self.assertEqual(self.client.get(reverse('tracking:dashboard')).status_code,
+                         200)
+
+        usuario.activo = False
+        usuario.save(update_fields=['activo'])
+
+        r = self.client.get(reverse('tracking:dashboard'))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn(self.login_url, r.headers['Location'])
+
+    def test_cada_cuenta_ve_solo_lo_suyo(self):
+        self.crear(empresas='PROCAPS')
+        self.entrar('jefe@procaps.com.co', 'Cl4veLarga')
+
+        html = self.client.get(reverse('tracking:dashboard')).content.decode()
+        self.assertIn('data-empresa="PROCAPS"', html)
+        self.assertNotIn('data-empresa="DITAR"', html)
+
+        r = self.client.get(reverse('tracking:api_dashboard'), {'empresa': 'DITAR'})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.client.get(reverse('tracking:api_fleet')).status_code,
+                         403)
+
+    def test_dos_empresas_en_una_cuenta(self):
+        self.crear(empresas='PROCAPS,DITAR')
+        self.entrar('jefe@procaps.com.co', 'Cl4veLarga')
+        html = self.client.get(reverse('tracking:dashboard')).content.decode()
+        for propia in ('PROCAPS', 'DITAR'):
+            self.assertIn(f'data-empresa="{propia}"', html)
+        self.assertNotIn('data-empresa="RELIANZ"', html)
+
+    def test_el_acceso_total_ve_todo_y_el_mapa(self):
+        self.crear(correo='samuel@rastrelital.com', empresas='',
+                   acceso_total=True)
+        self.entrar('samuel@rastrelital.com', 'Cl4veLarga')
+        html = self.client.get(reverse('tracking:dashboard')).content.decode()
+        for empresa in services.EMPRESAS:
+            self.assertIn(f'data-empresa="{empresa}"', html)
+        self.assertEqual(self.client.get(reverse('tracking:fleet')).status_code, 200)
+
+    def test_sin_empresas_y_sin_acceso_total_no_ve_ningun_viaje(self):
+        """El vacío significa «nada», no «todo»: por eso son dos campos."""
+        self.crear(empresas='', acceso_total=False)
+        self.entrar('jefe@procaps.com.co', 'Cl4veLarga')
+        r = self.client.get(reverse('tracking:api_dashboard'),
+                            {'empresa': 'PROCAPS'})
+        self.assertEqual(r.status_code, 403)
+
+    def test_se_anota_el_ultimo_ingreso(self):
+        usuario = self.crear()
+        self.assertIsNone(usuario.ultimo_ingreso)
+        self.entrar('jefe@procaps.com.co', 'Cl4veLarga')
+        usuario.refresh_from_db()
+        self.assertIsNotNone(usuario.ultimo_ingreso)
+
+    @override_settings(DASHBOARD_USUARIOS={
+        'jefe@procaps.com.co': {'clave': 'LaDeSettings', 'empresas': None}})
+    def test_la_tabla_le_gana_al_acceso_de_emergencia(self):
+        """Con la cuenta dada de alta, la de settings deja de contar.
+
+        Si no, cambiarle la clave a alguien en /admin/ no serviría de nada
+        mientras su correo siguiera en una variable de entorno.
+        """
+        self.crear(empresas='PROCAPS')
+        self.entrar('jefe@procaps.com.co', 'LaDeSettings')
+        self.assertFalse(self.client.session.get(CLAVE_SESION))
+
+        self.entrar('jefe@procaps.com.co', 'Cl4veLarga')
+        self.assertTrue(self.client.session.get(CLAVE_SESION))
+        # Y manda el techo de la tabla, no el acceso total de settings.
+        self.assertEqual(self.client.get(reverse('tracking:fleet')).status_code,
+                         302)
+
+
+@rapido_al_hashear
+class AdminDeCuentasTests(TestCase):
+    """El formulario de /admin/, que es por donde se dan de alta las personas."""
+
+    def datos(self, **cambios):
+        base = {'correo': 'jefe@procaps.com.co', 'nombre': 'Jefe',
+                'clave': 'Cl4veLarga', 'empresas': ['PROCAPS'],
+                'acceso_total': False, 'activo': True}
+        base.update(cambios)
+        return base
+
+    def test_crea_la_cuenta_con_la_clave_hasheada(self):
+        form = DashboardUsuarioForm(self.datos())
+        self.assertTrue(form.is_valid(), form.errors)
+        usuario = form.save()
+        self.assertNotIn('Cl4veLarga', usuario.clave_hash)
+        self.assertTrue(usuario.check_clave('Cl4veLarga'))
+        self.assertEqual(usuario.empresas, 'PROCAPS')
+
+    def test_las_casillas_se_guardan_separadas_por_comas(self):
+        form = DashboardUsuarioForm(self.datos(empresas=['PROCAPS', 'DITAR']))
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.save().empresas, 'PROCAPS,DITAR')
+
+    def test_al_crear_pide_clave(self):
+        form = DashboardUsuarioForm(self.datos(clave=''))
+        self.assertFalse(form.is_valid())
+        self.assertIn('clave', form.errors)
+
+    def test_al_editar_la_clave_en_blanco_conserva_la_de_antes(self):
+        usuario = DashboardUsuarioForm(self.datos()).save()
+        antes = usuario.clave_hash
+        form = DashboardUsuarioForm(self.datos(clave=''), instance=usuario)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.save().clave_hash, antes)
+
+    def test_no_deja_una_cuenta_sin_empresas_ni_acceso_total(self):
+        """Entraría a un dashboard vacío, y nadie sabría por qué."""
+        form = DashboardUsuarioForm(self.datos(empresas=[]))
+        self.assertFalse(form.is_valid())
+        self.assertIn('empresas', form.errors)
+
+    def test_con_acceso_total_no_hacen_falta_las_casillas(self):
+        form = DashboardUsuarioForm(self.datos(empresas=[], acceso_total=True))
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIsNone(form.save().empresas_tuple)
+
+    def test_al_editar_vuelve_a_marcar_las_casillas_guardadas(self):
+        usuario = DashboardUsuarioForm(
+            self.datos(empresas=['PROCAPS', 'DITAR'])).save()
+        form = DashboardUsuarioForm(instance=usuario)
+        self.assertEqual(form.initial['empresas'], ['PROCAPS', 'DITAR'])
+
+
+@rapido_al_hashear
+class ComandoCrearUsuarioTests(TestCase):
+    """El comando de consola: la primera cuenta, cuando aún no hay admin."""
+
+    def correr(self, *args, **opciones):
+        salida = StringIO()
+        call_command('crear_usuario_dashboard', *args, stdout=salida, **opciones)
+        return salida.getvalue()
+
+    def test_crea_una_cuenta(self):
+        self.correr('jefe@procaps.com.co', clave='Cl4veLarga',
+                    empresas='PROCAPS')
+        usuario = DashboardUsuario.objects.get(correo='jefe@procaps.com.co')
+        self.assertTrue(usuario.check_clave('Cl4veLarga'))
+        self.assertEqual(usuario.empresas_tuple, ('PROCAPS',))
+
+    def test_crea_una_cuenta_con_acceso_total(self):
+        self.correr('samuel@rastrelital.com', clave='Cl4veLarga',
+                    acceso_total=True)
+        usuario = DashboardUsuario.objects.get(correo='samuel@rastrelital.com')
+        self.assertIsNone(usuario.empresas_tuple)
+
+    def test_actualiza_la_clave_de_una_cuenta_que_ya_existe(self):
+        self.correr('jefe@procaps.com.co', clave='Vieja', empresas='PROCAPS')
+        self.correr('jefe@procaps.com.co', clave='Nueva', empresas='PROCAPS')
+        usuario = DashboardUsuario.objects.get(correo='jefe@procaps.com.co')
+        self.assertTrue(usuario.check_clave('Nueva'))
+        self.assertEqual(DashboardUsuario.objects.count(), 1)
+
+    def test_desactiva_una_cuenta(self):
+        self.correr('jefe@procaps.com.co', clave='Cl4veLarga',
+                    empresas='PROCAPS')
+        self.correr('jefe@procaps.com.co', desactivar=True)
+        self.assertFalse(
+            DashboardUsuario.objects.get(correo='jefe@procaps.com.co').activo)
+
+    def test_rechaza_lo_que_no_es_un_correo(self):
+        with self.assertRaisesMessage(CommandError, 'no es un correo'):
+            self.correr('admin', clave='Cl4veLarga', empresas='PROCAPS')
+
+    def test_rechaza_una_empresa_inventada(self):
+        with self.assertRaisesMessage(CommandError, 'Empresa desconocida'):
+            self.correr('jefe@x.com', clave='Cl4veLarga', empresas='INVENTADA')
+
+    def test_rechaza_una_cuenta_sin_empresas_ni_acceso_total(self):
+        with self.assertRaisesMessage(CommandError, '--acceso-total'):
+            self.correr('jefe@x.com', clave='Cl4veLarga')
+
+    def test_desactivar_una_cuenta_que_no_existe_avisa(self):
+        with self.assertRaisesMessage(CommandError, 'No hay ninguna cuenta'):
+            self.correr('nadie@x.com', desactivar=True)

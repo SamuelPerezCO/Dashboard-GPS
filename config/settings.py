@@ -54,13 +54,18 @@ GPS_APIKEY = os.getenv('GPS_APIKEY', '')
 GPS_USERNAME = os.getenv('GPS_USERNAME', '')
 GPS_PASSWORD = os.getenv('GPS_PASSWORD', '')
 
-# Catálogo de cuentas del dashboard, indexado por el correo con el que se
-# entra. `empresas: None` significa acceso total (todas las pestañas y el mapa
-# de flota).
+# Acceso de emergencia al dashboard, indexado por correo. `empresas: None`
+# significa acceso total (todas las pestañas y el mapa de flota).
 #
-# Tanto el correo como la clave salen del entorno, así que cambiar quién entra
-# no obliga a tocar el código. Lo que está escrito aquí abajo es solo para
-# desarrollo local: está en el repositorio y el sitio es público.
+# Las cuentas de verdad son filas de tracking.models.DashboardUsuario y se
+# dan de alta desde /admin/, una por persona y con la clave hasheada. Esto de
+# aquí es solo la puerta de atrás para dos casos: que la base de datos no
+# conteste, y que todavía no exista ninguna cuenta.
+#
+# En desarrollo trae cuentas por defecto para no tener que configurar nada. En
+# producción (DJANGO_DEBUG apagado) solo existe la cuenta que alguien haya
+# configurado a mano con sus dos variables: así las claves escritas aquí
+# abajo, que están en un repositorio público, no abren nada en el servidor.
 #
 # Las llaves quedan en minúsculas porque el login normaliza así el correo que
 # se escribe en el formulario.
@@ -72,26 +77,44 @@ _CUENTAS = (
     ('RELIANZ', 'relianz@rastrelital.com', 'relianz', ('RELIANZ',)),
 )
 
-def _catalogo_de(cuentas):
-    """Arma el catálogo del dashboard y se planta si el .env quedó mal.
+def _catalogo_de(cuentas, con_defectos):
+    """Arma el acceso de emergencia y se planta si el .env quedó mal.
 
-    Las tres cosas que revisa abrirían la puerta en silencio si pasaran:
+    Args:
+        cuentas: Tuplas (sufijo, correo, clave, empresas) como `_CUENTAS`.
+        con_defectos: Si es falso, una cuenta existe solo cuando sus dos
+            variables están puestas. Va apagado en producción, donde las
+            claves de este archivo no pueden abrir nada.
+
+    Las cuatro cosas que revisa abrirían la puerta en silencio si pasaran:
     un correo en blanco deja entrar con el campo vacío, una clave en blanco
-    deja entrar sin contraseña, y un correo repetido le da a una cuenta los
-    permisos de la otra (gana la última, y la primera desaparece). Con un
-    diccionario por comprensión las tres se ven igual de bien que una
-    configuración correcta, así que mejor reventar al arrancar.
+    deja entrar sin contraseña, un correo repetido le da a una cuenta los
+    permisos de la otra (gana la última, y la primera desaparece), y media
+    cuenta configurada deja la otra mitad en el valor público del archivo.
+    Con un diccionario por comprensión las cuatro se ven igual de bien que
+    una configuración correcta, así que mejor reventar al arrancar.
 
     Raises:
-        ImproperlyConfigured: Si alguna cuenta quedó sin correo, sin clave,
-            con algo que no es un correo, o repitiendo el de otra.
+        ImproperlyConfigured: Si alguna cuenta quedó a medias, sin correo,
+            sin clave, con algo que no es un correo, o repitiendo el de otra.
     """
     catalogo = {}
     for sufijo, correo_defecto, clave_defecto, empresas in cuentas:
         var_correo = f'DASHBOARD_CORREO_{sufijo}'
         var_clave = f'DASHBOARD_CLAVE_{sufijo}'
-        correo = os.getenv(var_correo, correo_defecto).strip().lower()
-        clave = os.getenv(var_clave, clave_defecto)
+        correo_env = os.getenv(var_correo)
+        clave_env = os.getenv(var_clave)
+        if correo_env is None and clave_env is None:
+            if not con_defectos:
+                continue
+            correo_env, clave_env = correo_defecto, clave_defecto
+        elif correo_env is None or clave_env is None:
+            raise ImproperlyConfigured(
+                f'{var_correo} y {var_clave} van juntas: pon las dos, o '
+                f'ninguna. Con una sola, la otra mitad de la cuenta se '
+                f'quedaría con el valor de ejemplo del código.')
+        correo = correo_env.strip().lower()
+        clave = clave_env
         if not correo:
             raise ImproperlyConfigured(
                 f'{var_correo} está vacía. Ponle un correo o bórrala del .env '
@@ -112,7 +135,7 @@ def _catalogo_de(cuentas):
     return catalogo
 
 
-DASHBOARD_USUARIOS = _catalogo_de(_CUENTAS)
+DASHBOARD_USUARIOS = _catalogo_de(_CUENTAS, con_defectos=DEBUG)
 
 # TEMPORAL: cuenta del botón «acceso sin cuenta» del login. La clave es
 # aleatoria por arranque para que nadie entre con ella por el formulario;

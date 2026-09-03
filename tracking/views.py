@@ -6,16 +6,18 @@ import threading
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import DatabaseError
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.crypto import constant_time_compare
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from . import api_client, services
 from .middleware import (CLAVE_LOGIN_NUEVO, CLAVE_SESION, CLAVE_USUARIO,
                          cuenta_actual, esta_autenticado, nombre_usuario,
-                         nombre_visible, tiene_acceso_total)
+                         nombre_visible, tiene_acceso_total, usuario_en_bd)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,37 @@ def _lanzar_precalentamiento():
     threading.Thread(target=_precalentar_dashboard,
                      name='precalentar-dashboard', daemon=True).start()
     return True
+
+
+def _credenciales_validas(correo, clave):
+    """Dice si ese correo y esa clave abren una sesión.
+
+    Mira primero la tabla de cuentas, que es donde se dan de alta las
+    personas, y solo si ahí no hay nadie con ese correo cae al catálogo de
+    settings, que es el acceso de emergencia para cuando la base no está.
+
+    Returns:
+        La pareja (sirve, usuario), donde `usuario` es la fila de la tabla
+        cuando la cuenta salió de ahí, y None cuando salió de settings.
+    """
+    usuario = usuario_en_bd(correo)
+    if usuario is not None:
+        return usuario.check_clave(clave), usuario
+    cuenta = settings.DASHBOARD_USUARIOS.get(correo)
+    # La clave vacía no autentica aunque el catálogo traiga una en blanco:
+    # constant_time_compare('', '') es cierto.
+    sirve = bool(cuenta) and bool(clave) and constant_time_compare(
+        clave, cuenta['clave'] if cuenta else '')
+    return sirve, None
+
+
+def _anotar_ingreso(usuario):
+    """Deja la fecha del último ingreso, sin estorbar si la base falla."""
+    try:
+        usuario.ultimo_ingreso = timezone.now()
+        usuario.save(update_fields=['ultimo_ingreso'])
+    except DatabaseError:
+        logger.exception('No se pudo anotar el ingreso de %s', usuario.correo)
 
 
 def _clave_intentos(request):
@@ -117,14 +150,15 @@ def login_view(request):
         else:
             correo = (request.POST.get('correo') or '').strip().lower()
             clave = request.POST.get('clave') or ''
-            cuenta = settings.DASHBOARD_USUARIOS.get(correo)
-            ok_clave = constant_time_compare(clave, cuenta['clave'] if cuenta else '')
-            if cuenta and clave and ok_clave:
+            sirve, usuario = _credenciales_validas(correo, clave)
+            if sirve:
                 cache.delete(clave_intentos)
                 request.session.cycle_key()
                 request.session[CLAVE_SESION] = True
                 request.session[CLAVE_USUARIO] = correo
                 request.session[CLAVE_LOGIN_NUEVO] = True
+                if usuario is not None:
+                    _anotar_ingreso(usuario)
                 return redirect(destino)
             cache.set(clave_intentos, intentos + 1, BLOQUEO_SEGUNDOS)
             # Antes se entraba con nombres cortos ('admin', 'procaps'). A quien
