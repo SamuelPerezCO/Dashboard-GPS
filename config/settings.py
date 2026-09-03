@@ -15,6 +15,7 @@ import secrets
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -53,18 +54,65 @@ GPS_APIKEY = os.getenv('GPS_APIKEY', '')
 GPS_USERNAME = os.getenv('GPS_USERNAME', '')
 GPS_PASSWORD = os.getenv('GPS_PASSWORD', '')
 
-# Catálogo de cuentas del dashboard. `empresas: None` significa acceso total
-# (todas las pestañas y el mapa de flota).
-DASHBOARD_USUARIOS = {
-    'admin':   {'clave': os.getenv('DASHBOARD_CLAVE_ADMIN', 'Admin'),
-                'empresas': None},
-    'procaps': {'clave': os.getenv('DASHBOARD_CLAVE_PROCAPS', 'Procaps'),
-                'empresas': ('PROCAPS',)},
-    'ditar':   {'clave': os.getenv('DASHBOARD_CLAVE_DITAR', 'Ditar'),
-                'empresas': ('DITAR',)},
-    'relianz': {'clave': os.getenv('DASHBOARD_CLAVE_RELIANZ', 'relianz'),
-                'empresas': ('RELIANZ',)},
-}
+# Catálogo de cuentas del dashboard, indexado por el correo con el que se
+# entra. `empresas: None` significa acceso total (todas las pestañas y el mapa
+# de flota).
+#
+# Tanto el correo como la clave salen del entorno, así que cambiar quién entra
+# no obliga a tocar el código. Lo que está escrito aquí abajo es solo para
+# desarrollo local: está en el repositorio y el sitio es público.
+#
+# Las llaves quedan en minúsculas porque el login normaliza así el correo que
+# se escribe en el formulario.
+_CUENTAS = (
+    # (sufijo de las variables, correo por defecto, clave por defecto, empresas)
+    ('ADMIN',   'admin@rastrelital.com',   'Admin',   None),
+    ('PROCAPS', 'procaps@rastrelital.com', 'Procaps', ('PROCAPS',)),
+    ('DITAR',   'ditar@rastrelital.com',   'Ditar',   ('DITAR',)),
+    ('RELIANZ', 'relianz@rastrelital.com', 'relianz', ('RELIANZ',)),
+)
+
+def _catalogo_de(cuentas):
+    """Arma el catálogo del dashboard y se planta si el .env quedó mal.
+
+    Las tres cosas que revisa abrirían la puerta en silencio si pasaran:
+    un correo en blanco deja entrar con el campo vacío, una clave en blanco
+    deja entrar sin contraseña, y un correo repetido le da a una cuenta los
+    permisos de la otra (gana la última, y la primera desaparece). Con un
+    diccionario por comprensión las tres se ven igual de bien que una
+    configuración correcta, así que mejor reventar al arrancar.
+
+    Raises:
+        ImproperlyConfigured: Si alguna cuenta quedó sin correo, sin clave,
+            con algo que no es un correo, o repitiendo el de otra.
+    """
+    catalogo = {}
+    for sufijo, correo_defecto, clave_defecto, empresas in cuentas:
+        var_correo = f'DASHBOARD_CORREO_{sufijo}'
+        var_clave = f'DASHBOARD_CLAVE_{sufijo}'
+        correo = os.getenv(var_correo, correo_defecto).strip().lower()
+        clave = os.getenv(var_clave, clave_defecto)
+        if not correo:
+            raise ImproperlyConfigured(
+                f'{var_correo} está vacía. Ponle un correo o bórrala del .env '
+                f'para volver al valor por defecto.')
+        if '@' not in correo:
+            raise ImproperlyConfigured(
+                f'{var_correo} vale {correo!r}, que no es un correo: al '
+                f'dashboard se entra con el correo completo.')
+        if correo in catalogo:
+            raise ImproperlyConfigured(
+                f'{var_correo} repite el correo {correo!r}, que ya usa otra '
+                f'cuenta. Cada cuenta necesita el suyo.')
+        if not clave:
+            raise ImproperlyConfigured(
+                f'{var_clave} está vacía, y una clave vacía deja entrar a '
+                f'{correo!r} sin escribir nada.')
+        catalogo[correo] = {'clave': clave, 'empresas': empresas}
+    return catalogo
+
+
+DASHBOARD_USUARIOS = _catalogo_de(_CUENTAS)
 
 # TEMPORAL: cuenta del botón «acceso sin cuenta» del login. La clave es
 # aleatoria por arranque para que nadie entre con ella por el formulario;

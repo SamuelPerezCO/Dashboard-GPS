@@ -1,15 +1,38 @@
 """Pruebas del dashboard. El API va simulado: la suite no toca la red."""
 
+import os
 from datetime import date, datetime
 from unittest.mock import patch
 
+from config.settings import _catalogo_de
 from django.conf import settings
 from django.core.cache import cache
-from django.test import Client, TestCase
+from django.core.exceptions import ImproperlyConfigured
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from . import services, views
 from .middleware import CLAVE_SESION, CLAVE_USUARIO
+
+# Correos y catálogo fijos para las pruebas. El de settings sale del entorno
+# (DASHBOARD_CORREO_* y DASHBOARD_CLAVE_*), y la suite no puede depender de lo
+# que cada máquina tenga escrito en su .env.
+ADMIN = 'admin@rastrelital.com'
+PROCAPS = 'procaps@rastrelital.com'
+DITAR = 'ditar@rastrelital.com'
+RELIANZ = 'relianz@rastrelital.com'
+
+CATALOGO = {
+    ADMIN:   {'clave': 'Admin', 'empresas': None},
+    PROCAPS: {'clave': 'Procaps', 'empresas': ('PROCAPS',)},
+    DITAR:   {'clave': 'Ditar', 'empresas': ('DITAR',)},
+    RELIANZ: {'clave': 'relianz', 'empresas': ('RELIANZ',)},
+    # TEMPORAL: la cuenta del botón de acceso sin cuenta. No es un correo
+    # porque a esa entrada no se llega por el formulario, sino por su vista.
+    'invitado': {'clave': 'no-se-escribe-a-mano', 'empresas': None},
+}
+
+con_catalogo = override_settings(DASHBOARD_USUARIOS=CATALOGO)
 
 
 def _alerta(equipo, hora, geocerca, fecha='2026-07-20', fuera=False):
@@ -539,6 +562,7 @@ class RangeSummaryTests(TestCase):
                          ['2026-07-20', '2026-07-21', '2026-07-22'])
 
 
+@con_catalogo
 class SinBaseDeDatosTests(TestCase):
     """Entrar y ver el dashboard no escribe una sola fila."""
 
@@ -549,16 +573,17 @@ class SinBaseDeDatosTests(TestCase):
     def test_entrar_no_escribe_en_la_base_de_datos(self):
         with self.assertNumQueries(0):
             r = self.client.post(reverse('tracking:login'),
-                                 {'usuario': 'admin', 'clave': 'Admin'})
+                                 {'correo': ADMIN, 'clave': 'Admin'})
         self.assertEqual(r.status_code, 302)
 
     def test_ver_el_dashboard_no_escribe_en_la_base_de_datos(self):
         self.client.post(reverse('tracking:login'),
-                         {'usuario': 'admin', 'clave': 'Admin'})
+                         {'correo': ADMIN, 'clave': 'Admin'})
         with self.assertNumQueries(0):
             self.client.get(reverse('tracking:dashboard'))
 
 
+@con_catalogo
 class PrecalentamientoTests(TestCase):
     """El precalentamiento que lanza el login."""
 
@@ -590,12 +615,12 @@ class PrecalentamientoTests(TestCase):
 
     @patch.object(views, 'threading')
     def test_el_post_no_lo_lanza(self, hilos):
-        self.client.post(self.login_url, {'usuario': 'x', 'clave': 'y'})
+        self.client.post(self.login_url, {'correo': 'x@rastrelital.com', 'clave': 'y'})
         hilos.Thread.assert_not_called()
 
     @patch.object(views, 'threading')
     def test_con_sesion_iniciada_no_precalienta(self, hilos):
-        self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
+        self.client.post(self.login_url, {'correo': ADMIN, 'clave': 'Admin'})
         self.client.get(self.login_url)
         hilos.Thread.assert_not_called()
 
@@ -613,6 +638,7 @@ class PrecalentamientoTests(TestCase):
         self.assertIn('omitido', log.output[0])
 
 
+@con_catalogo
 class LoginTests(TestCase):
     """Quién entra, quién no y cómo se frena a quien insiste."""
 
@@ -665,13 +691,13 @@ class LoginTests(TestCase):
                              fetch_redirect_response=False)
 
     def test_credenciales_correctas(self):
-        r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
+        r = self.client.post(self.login_url, {'correo': ADMIN, 'clave': 'Admin'})
         self.assertRedirects(r, reverse('tracking:dashboard'),
                              fetch_redirect_response=False)
         self.assertTrue(self.client.session.get(CLAVE_SESION))
 
     def test_credenciales_incorrectas(self):
-        r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'mala'})
+        r = self.client.post(self.login_url, {'correo': ADMIN, 'clave': 'mala'})
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'incorrectos')
         self.assertFalse(self.client.session.get(CLAVE_SESION))
@@ -679,18 +705,18 @@ class LoginTests(TestCase):
     def test_respeta_next(self):
         destino = reverse('tracking:fleet')
         r = self.client.post(self.login_url,
-                             {'usuario': 'admin', 'clave': 'Admin', 'next': destino})
+                             {'correo': ADMIN, 'clave': 'Admin', 'next': destino})
         self.assertRedirects(r, destino, fetch_redirect_response=False)
 
     def test_no_sirve_de_trampolin_a_otro_sitio(self):
         r = self.client.post(self.login_url, {
-            'usuario': 'admin', 'clave': 'Admin',
+            'correo': ADMIN, 'clave': 'Admin',
             'next': 'https://sitio-malo.example/x'})
         self.assertRedirects(r, reverse('tracking:dashboard'),
                              fetch_redirect_response=False)
 
     def test_salir_cierra_la_sesion_solo_por_post(self):
-        self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
+        self.client.post(self.login_url, {'correo': ADMIN, 'clave': 'Admin'})
         salir = reverse('tracking:logout')
 
         self.client.get(salir)
@@ -722,10 +748,52 @@ class LoginTests(TestCase):
 
     def test_freno_tras_varios_intentos_fallidos(self):
         for _ in range(views.MAX_INTENTOS):
-            self.client.post(self.login_url, {'usuario': 'x', 'clave': 'y'})
-        r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
+            self.client.post(self.login_url, {'correo': 'x@rastrelital.com', 'clave': 'y'})
+        r = self.client.post(self.login_url, {'correo': ADMIN, 'clave': 'Admin'})
         self.assertContains(r, 'Demasiados intentos')
         self.assertFalse(self.client.session.get(CLAVE_SESION))
+
+    def test_el_formulario_pide_un_correo(self):
+        r = self.client.get(self.login_url)
+        self.assertContains(r, 'name="correo"')
+        self.assertContains(r, 'type="email"')
+        self.assertNotContains(r, 'name="usuario"')
+
+    def test_el_nombre_corto_de_antes_ya_no_entra(self):
+        """Candado del cambio a correos: 'admin' era una cuenta válida.
+
+        Quien lo escriba se lleva una explicación en vez del error genérico:
+        decir que ahora va el correo habla del formato del campo, no de si
+        esa cuenta existe, así que no delata a nadie.
+        """
+        r = self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(self.client.session.get(CLAVE_SESION))
+
+        r = self.client.post(self.login_url, {'correo': 'admin', 'clave': 'Admin'})
+        self.assertContains(r, 'el correo completo')
+        self.assertFalse(self.client.session.get(CLAVE_SESION))
+
+    def test_el_nombre_corto_tambien_gasta_intentos(self):
+        """La explicación del correo no es una puerta de atrás al freno."""
+        for _ in range(views.MAX_INTENTOS):
+            self.client.post(self.login_url, {'correo': 'admin', 'clave': 'Admin'})
+        r = self.client.post(self.login_url, {'correo': ADMIN, 'clave': 'Admin'})
+        self.assertContains(r, 'Demasiados intentos')
+        self.assertFalse(self.client.session.get(CLAVE_SESION))
+
+    def test_una_clave_vacia_no_autentica(self):
+        """Defensa en profundidad, por si el catálogo llega mal armado.
+
+        `constant_time_compare('', '')` es cierto, así que una cuenta con la
+        clave en blanco dejaría entrar sin escribir nada. Settings ya no deja
+        armar una así, pero la vista tampoco tiene por qué confiar.
+        """
+        with self.settings(DASHBOARD_USUARIOS={ADMIN: {'clave': '',
+                                                       'empresas': None}}):
+            r = self.client.post(self.login_url, {'correo': ADMIN, 'clave': ''})
+            self.assertEqual(r.status_code, 200)
+            self.assertFalse(self.client.session.get(CLAVE_SESION))
 
     def test_el_admin_conserva_su_propio_login(self):
         # Ahora el login vive en '/', así que "no contiene el login" sería
@@ -735,8 +803,9 @@ class LoginTests(TestCase):
         self.assertTrue(r.headers.get('Location', '').startswith('/admin/login'))
 
 
+@con_catalogo
 class AccesoPorEmpresaTests(TestCase):
-    """Cada usuario ve solo los viajes de su empresa, también en el JSON."""
+    """Cada cuenta ve solo los viajes de su empresa, también en el JSON."""
 
     def setUp(self):
         cache.clear()
@@ -746,36 +815,47 @@ class AccesoPorEmpresaTests(TestCase):
         parche.start()
         self.addCleanup(parche.stop)
 
-    def entrar(self, usuario, clave):
-        return self.client.post(self.login_url, {'usuario': usuario, 'clave': clave})
+    def entrar(self, correo, clave):
+        return self.client.post(self.login_url, {'correo': correo, 'clave': clave})
 
-    def test_los_cuatro_usuarios_entran(self):
-        for usuario, clave in (('admin', 'Admin'), ('procaps', 'Procaps'),
-                               ('ditar', 'Ditar'), ('relianz', 'relianz')):
+    def test_las_cuatro_cuentas_entran_con_su_correo(self):
+        for correo, clave in ((ADMIN, 'Admin'), (PROCAPS, 'Procaps'),
+                              (DITAR, 'Ditar'), (RELIANZ, 'relianz')):
             self.client.post(reverse('tracking:logout'))
             cache.clear()
-            self.entrar(usuario, clave)
-            self.assertEqual(self.client.session.get(CLAVE_USUARIO), usuario)
+            self.entrar(correo, clave)
+            self.assertEqual(self.client.session.get(CLAVE_USUARIO), correo)
 
-    def test_el_usuario_no_distingue_mayusculas_pero_la_clave_si(self):
-        self.entrar('PROCAPS', 'Procaps')
-        self.assertEqual(self.client.session.get(CLAVE_USUARIO), 'procaps')
+    def test_el_correo_no_distingue_mayusculas_ni_espacios_pero_la_clave_si(self):
+        self.entrar('  PROCAPS@Rastrelital.COM  ', 'Procaps')
+        self.assertEqual(self.client.session.get(CLAVE_USUARIO), PROCAPS)
 
         self.client.post(reverse('tracking:logout'))
-        self.entrar('procaps', 'procaps')
+        self.entrar(PROCAPS, 'procaps')
         self.assertFalse(self.client.session.get(CLAVE_SESION))
 
-    def test_cada_usuario_dibuja_solo_sus_pestanas(self):
+    def test_la_barra_muestra_el_nombre_corto_y_el_correo_entero(self):
+        """El correo entero no cabe en la píldora de la cabecera.
+
+        Ahí va lo que está antes del '@'; el correo completo se queda en el
+        `title`, que es donde sí hay sitio para leerlo.
+        """
+        self.entrar(PROCAPS, 'Procaps')
+        r = self.client.get(reverse('tracking:dashboard'))
+        self.assertEqual(r.context['usuario'], 'procaps')
+        self.assertEqual(r.context['correo'], PROCAPS)
+        self.assertContains(r, f'title="Sesión iniciada como {PROCAPS}"')
+
+    def test_cada_cuenta_dibuja_solo_sus_pestanas(self):
         casos = {
-            'procaps': ('PROCAPS', ('DITAR', 'RELIANZ')),
-            'ditar':   ('DITAR', ('PROCAPS', 'RELIANZ')),
-            'relianz': ('RELIANZ', ('PROCAPS', 'DITAR')),
+            PROCAPS: ('Procaps', 'PROCAPS', ('DITAR', 'RELIANZ')),
+            DITAR:   ('Ditar',   'DITAR',   ('PROCAPS', 'RELIANZ')),
+            RELIANZ: ('relianz', 'RELIANZ', ('PROCAPS', 'DITAR')),
         }
-        for usuario, (propia, ajenas) in casos.items():
+        for correo, (clave, propia, ajenas) in casos.items():
             self.client.post(reverse('tracking:logout'))
             cache.clear()
-            self.entrar(usuario, {'procaps': 'Procaps', 'ditar': 'Ditar',
-                                  'relianz': 'relianz'}[usuario])
+            self.entrar(correo, clave)
             r = self.client.get(reverse('tracking:dashboard'))
             self.assertContains(r, f'data-empresa="{propia}"')
             self.assertContains(r, f'data-empresa="{services.TAB_SIN_IDENTIFICAR}"')
@@ -783,19 +863,19 @@ class AccesoPorEmpresaTests(TestCase):
                 self.assertNotContains(r, f'data-empresa="{ajena}"')
 
     def test_el_admin_dibuja_todas_las_pestanas(self):
-        self.entrar('admin', 'Admin')
+        self.entrar(ADMIN, 'Admin')
         r = self.client.get(reverse('tracking:dashboard'))
         for valor in services.EMPRESAS:
             self.assertContains(r, f'data-empresa="{valor}"')
 
     def test_el_json_rechaza_la_empresa_ajena(self):
-        self.entrar('procaps', 'Procaps')
+        self.entrar(PROCAPS, 'Procaps')
         r = self.client.get(reverse('tracking:api_dashboard'), {'empresa': 'DITAR'})
         self.assertEqual(r.status_code, 403)
         self.assertIn('no tiene acceso', r.json()['error'])
 
     def test_el_json_acepta_la_empresa_propia_y_la_sin_identificar(self):
-        self.entrar('procaps', 'Procaps')
+        self.entrar(PROCAPS, 'Procaps')
         with patch.object(services, 'range_summary', return_value={}) as resumen:
             for empresa in ('PROCAPS', services.TAB_SIN_IDENTIFICAR):
                 r = self.client.get(reverse('tracking:api_dashboard'),
@@ -804,7 +884,7 @@ class AccesoPorEmpresaTests(TestCase):
         self.assertEqual(resumen.call_count, 2)
 
     def test_el_json_le_pasa_el_techo_del_usuario_a_services(self):
-        self.entrar('ditar', 'Ditar')
+        self.entrar(DITAR, 'Ditar')
         with patch.object(services, 'range_summary', return_value={}) as resumen:
             self.client.get(reverse('tracking:api_dashboard'),
                             {'desde': '2026-07-20', 'hasta': '2026-07-20'})
@@ -813,7 +893,7 @@ class AccesoPorEmpresaTests(TestCase):
             ['DITAR', services.TAB_SIN_IDENTIFICAR], None, None, None, None)
 
     def test_el_mapa_de_flota_es_solo_del_admin(self):
-        self.entrar('relianz', 'relianz')
+        self.entrar(RELIANZ, 'relianz')
         r = self.client.get(reverse('tracking:fleet'))
         self.assertRedirects(r, reverse('tracking:dashboard'),
                              fetch_redirect_response=False)
@@ -821,21 +901,22 @@ class AccesoPorEmpresaTests(TestCase):
         self.assertEqual(r.status_code, 403)
 
     def test_el_admin_si_ve_el_mapa(self):
-        self.entrar('admin', 'Admin')
+        self.entrar(ADMIN, 'Admin')
         self.assertEqual(self.client.get(reverse('tracking:fleet')).status_code, 200)
 
     def test_quitar_un_usuario_del_catalogo_cierra_su_sesion(self):
-        self.entrar('procaps', 'Procaps')
+        self.entrar(PROCAPS, 'Procaps')
         catalogo = {k: v for k, v in settings.DASHBOARD_USUARIOS.items()
-                    if k != 'procaps'}
+                    if k != PROCAPS}
         with self.settings(DASHBOARD_USUARIOS=catalogo):
             r = self.client.get(reverse('tracking:dashboard'))
         self.assertEqual(r.status_code, 302)
         self.assertIn(self.login_url, r.headers['Location'])
 
 
+@con_catalogo
 class PestanaTests(TestCase):
-    """Cerrar la pestaña obliga a escribir usuario y contraseña otra vez."""
+    """Cerrar la pestaña obliga a escribir correo y contraseña otra vez."""
 
     def setUp(self):
         cache.clear()
@@ -846,7 +927,7 @@ class PestanaTests(TestCase):
         self.addCleanup(parche.stop)
 
     def entrar(self):
-        self.client.post(self.login_url, {'usuario': 'admin', 'clave': 'Admin'})
+        self.client.post(self.login_url, {'correo': ADMIN, 'clave': 'Admin'})
 
     def test_la_pagina_de_entrada_sella_la_pestana(self):
         self.entrar()
@@ -863,7 +944,7 @@ class PestanaTests(TestCase):
     def test_el_mapa_tambien_sella_al_entrar_directo(self):
         destino = reverse('tracking:fleet')
         self.client.post(self.login_url,
-                         {'usuario': 'admin', 'clave': 'Admin', 'next': destino})
+                         {'correo': ADMIN, 'clave': 'Admin', 'next': destino})
         r = self.client.get(destino)
         self.assertTrue(r.context['sesion_nueva'])
 
@@ -875,7 +956,7 @@ class PestanaTests(TestCase):
         cliente = Client(enforce_csrf_checks=True)
         cliente.get(self.login_url)
         cliente.post(self.login_url, {
-            'usuario': 'admin', 'clave': 'Admin',
+            'correo': ADMIN, 'clave': 'Admin',
             'csrfmiddlewaretoken': cliente.cookies['csrftoken'].value})
         self.assertTrue(cliente.session.get(CLAVE_SESION))
 
@@ -891,13 +972,14 @@ class PestanaTests(TestCase):
         self.assertEqual(cookie['expires'], '')
 
 
+@con_catalogo
 class DashboardTests(TestCase):
     """La página del dashboard y los errores de su endpoint JSON."""
 
     def setUp(self):
         cache.clear()
         self.client.post(reverse('tracking:login'),
-                         {'usuario': 'admin', 'clave': 'Admin'})
+                         {'correo': ADMIN, 'clave': 'Admin'})
 
     def test_dibuja_una_pestana_por_empresa(self):
         r = self.client.get(reverse('tracking:dashboard'))
@@ -1027,3 +1109,126 @@ class DashboardTests(TestCase):
             r = self.client.get(reverse('tracking:api_dashboard'))
         self.assertEqual(r.status_code, 502)
         self.assertIn('error', r.json())
+
+
+class CatalogoDeCuentasTests(TestCase):
+    """El catálogo se planta si el .env deja una cuenta mal configurada.
+
+    Las cuatro fallas de aquí abajo abren la puerta en silencio: con un
+    diccionario por comprensión se ven igual de bien que una configuración
+    correcta, y el sitio arranca con el hueco puesto. Tienen que reventar al
+    arrancar, no al primer login raro.
+    """
+
+    CUENTAS = (
+        ('ADMIN', 'admin@rastrelital.com', 'Admin', None),
+        ('PROCAPS', 'procaps@rastrelital.com', 'Procaps', ('PROCAPS',)),
+    )
+
+    def armar(self, **entorno):
+        """Arma el catálogo con un entorno limpio más lo que se le pase."""
+        limpio = {k: v for k, v in os.environ.items()
+                  if not k.startswith('DASHBOARD_')}
+        limpio.update(entorno)
+        with patch.dict(os.environ, limpio, clear=True):
+            return _catalogo_de(self.CUENTAS)
+
+    def test_la_configuracion_buena_arma_el_catalogo(self):
+        catalogo = self.armar()
+        self.assertEqual(sorted(catalogo),
+                         ['admin@rastrelital.com', 'procaps@rastrelital.com'])
+        self.assertIsNone(catalogo['admin@rastrelital.com']['empresas'])
+
+    def test_el_entorno_manda_sobre_el_correo_y_la_clave(self):
+        catalogo = self.armar(DASHBOARD_CORREO_ADMIN='  Samuel@Rastrelital.COM ',
+                              DASHBOARD_CLAVE_ADMIN='otra')
+        self.assertIn('samuel@rastrelital.com', catalogo)
+        self.assertEqual(catalogo['samuel@rastrelital.com']['clave'], 'otra')
+
+    def test_rechaza_el_correo_en_blanco(self):
+        """Una llave vacía deja entrar con el campo del correo vacío."""
+        for vacio in ('', '   '):
+            with self.assertRaisesMessage(ImproperlyConfigured,
+                                          'DASHBOARD_CORREO_ADMIN'):
+                self.armar(DASHBOARD_CORREO_ADMIN=vacio)
+
+    def test_rechaza_lo_que_no_es_un_correo(self):
+        """Si no lleva '@', el aviso del login mentiría: la cuenta existe."""
+        with self.assertRaisesMessage(ImproperlyConfigured, 'no es un correo'):
+            self.armar(DASHBOARD_CORREO_ADMIN='admin')
+
+    def test_rechaza_el_correo_repetido(self):
+        """Gana el último: la primera cuenta desaparece y cambian los permisos."""
+        with self.assertRaisesMessage(ImproperlyConfigured, 'repite el correo'):
+            self.armar(DASHBOARD_CORREO_ADMIN='jefe@procaps.com',
+                       DASHBOARD_CORREO_PROCAPS='jefe@procaps.com')
+
+    def test_rechaza_la_clave_en_blanco(self):
+        with self.assertRaisesMessage(ImproperlyConfigured, 'sin escribir nada'):
+            self.armar(DASHBOARD_CLAVE_ADMIN='')
+
+
+@con_catalogo
+class CorreosDeCualquierFormaTests(TestCase):
+    """El correo puede ser el que sea: no hay dominio privilegiado.
+
+    Los correos que trae el código por defecto son `@rastrelital.com`, pero
+    eso es solo el valor de desarrollo: en producción cada cuenta usa el
+    correo real de su persona, del dominio que sea. Estas pruebas le cierran
+    la puerta a que alguien, más adelante, ate el login a un dominio.
+    """
+
+    DIRECCIONES = (
+        'samuel@gmail.com',
+        'samuel.perez@procaps.com.co',
+        'samuel+gps@gmail.com',
+        's@x.io',
+        'jefe-de-flota@ditar-transportes.com.co',
+        'usuario_1@sub.dominio.example.com',
+        "o'brien@example.com",
+        'coordinacion.de.transporte.especial@transportes-del-caribe.com.co',
+    )
+
+    def setUp(self):
+        cache.clear()
+        parche = patch.object(views, '_lanzar_precalentamiento',
+                              return_value=False)
+        parche.start()
+        self.addCleanup(parche.stop)
+
+    def test_entra_con_cualquier_correo(self):
+        for correo in self.DIRECCIONES:
+            with self.subTest(correo=correo):
+                cache.clear()
+                with self.settings(DASHBOARD_USUARIOS={
+                        correo: {'clave': 'Cl4ve', 'empresas': None}}):
+                    self.client.post(reverse('tracking:logout'))
+                    r = self.client.post(reverse('tracking:login'),
+                                         {'correo': f'  {correo.upper()}  ',
+                                          'clave': 'Cl4ve'})
+                    self.assertEqual(r.status_code, 302)
+                    self.assertEqual(self.client.session.get(CLAVE_USUARIO),
+                                     correo)
+
+    def test_el_catalogo_acepta_cualquier_dominio(self):
+        for correo in self.DIRECCIONES:
+            with self.subTest(correo=correo):
+                limpio = {k: v for k, v in os.environ.items()
+                          if not k.startswith('DASHBOARD_')}
+                limpio['DASHBOARD_CORREO_ADMIN'] = f'  {correo.upper()}  '
+                with patch.dict(os.environ, limpio, clear=True):
+                    catalogo = _catalogo_de(
+                        (('ADMIN', 'x@y.com', 'Admin', None),))
+                self.assertEqual(list(catalogo), [correo])
+
+    def test_la_barra_escapa_el_correo(self):
+        """El correo se pinta en la cabecera, así que no puede inyectar HTML."""
+        hostil = 'x<script>alert(1)</script>@evil.com'
+        with self.settings(DASHBOARD_USUARIOS={hostil: {'clave': 'Cl4ve',
+                                                        'empresas': None}}):
+            self.client.post(reverse('tracking:login'),
+                             {'correo': hostil, 'clave': 'Cl4ve'})
+            r = self.client.get(reverse('tracking:dashboard'))
+        html = r.content.decode()
+        self.assertNotIn(hostil, html)
+        self.assertIn('&lt;script&gt;', html)

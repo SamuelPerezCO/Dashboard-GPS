@@ -15,7 +15,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from . import api_client, services
 from .middleware import (CLAVE_LOGIN_NUEVO, CLAVE_SESION, CLAVE_USUARIO,
                          cuenta_actual, esta_autenticado, nombre_usuario,
-                         tiene_acceso_total)
+                         nombre_visible, tiene_acceso_total)
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +88,10 @@ def home(request):
 def login_view(request):
     """Formulario de acceso al dashboard, y la raíz del sitio.
 
-    Compara contra DASHBOARD_USUARIOS: el usuario no distingue mayúsculas,
-    la contraseña sí. Tras MAX_INTENTOS fallos desde la misma IP el login
-    se bloquea un rato, porque el sitio es público.
+    Compara contra DASHBOARD_USUARIOS, que va indexado por correo: el
+    correo no distingue mayúsculas, la contraseña sí. Tras MAX_INTENTOS
+    fallos desde la misma IP el login se bloquea un rato, porque el sitio
+    es público.
 
     El GET además manda a precalentar el dashboard: mientras la persona
     escribe su contraseña, el servidor va adelantando consultas al API.
@@ -114,19 +115,25 @@ def login_view(request):
             error = (f'Demasiados intentos fallidos. Espera {BLOQUEO_SEGUNDOS} '
                      f'segundos y vuelve a intentarlo.')
         else:
-            usuario = (request.POST.get('usuario') or '').strip().lower()
+            correo = (request.POST.get('correo') or '').strip().lower()
             clave = request.POST.get('clave') or ''
-            cuenta = settings.DASHBOARD_USUARIOS.get(usuario)
+            cuenta = settings.DASHBOARD_USUARIOS.get(correo)
             ok_clave = constant_time_compare(clave, cuenta['clave'] if cuenta else '')
-            if cuenta and ok_clave:
+            if cuenta and clave and ok_clave:
                 cache.delete(clave_intentos)
                 request.session.cycle_key()
                 request.session[CLAVE_SESION] = True
-                request.session[CLAVE_USUARIO] = usuario
+                request.session[CLAVE_USUARIO] = correo
                 request.session[CLAVE_LOGIN_NUEVO] = True
                 return redirect(destino)
             cache.set(clave_intentos, intentos + 1, BLOQUEO_SEGUNDOS)
-            error = 'Usuario o contraseña incorrectos.'
+            # Antes se entraba con nombres cortos ('admin', 'procaps'). A quien
+            # todavía los escriba se le dice que ahora va el correo: eso habla
+            # de la forma del campo, no de si esa cuenta existe.
+            error = ('Ahora se entra con el correo completo, no con el nombre '
+                     'de usuario.'
+                     if correo and '@' not in correo
+                     else 'Correo o contraseña incorrectos.')
 
     return render(request, 'tracking/login.html', {'error': error, 'next': destino})
 
@@ -181,7 +188,8 @@ def dashboard(request):
                    for t in services.TURNOS],
         'tipos': [{'valor': t, 'etiqueta': services.ETIQUETA_TIPO[t]}
                   for t in services.TIPOS],
-        'usuario': nombre_usuario(request),
+        'usuario': nombre_visible(request),
+        'correo': nombre_usuario(request),
         'sesion_nueva': _sesion_nueva(request),
     })
 
@@ -198,7 +206,8 @@ def fleet_dashboard(request):
     if not tiene_acceso_total(request):
         return redirect('tracking:dashboard')
     return render(request, 'tracking/fleet.html', {
-        'usuario': nombre_usuario(request),
+        'usuario': nombre_visible(request),
+        'correo': nombre_usuario(request),
         'sesion_nueva': _sesion_nueva(request),
     })
 

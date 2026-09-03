@@ -117,17 +117,29 @@ GPS_PASSWORD=...
 DJANGO_SECRET_KEY=...
 DJANGO_DEBUG=1                  # 1 solo en desarrollo
 
-DASHBOARD_CLAVE_ADMIN=...       # opcional: cambia la clave de un usuario
-DASHBOARD_CLAVE_PROCAPS=...     #           sin tocar el código
+DASHBOARD_CORREO_ADMIN=...      # opcional: cambia el correo y la clave de
+DASHBOARD_CLAVE_ADMIN=...       #           una cuenta sin tocar el código
+DASHBOARD_CORREO_PROCAPS=...
+DASHBOARD_CLAVE_PROCAPS=...
+DASHBOARD_CORREO_DITAR=...
 DASHBOARD_CLAVE_DITAR=...
+DASHBOARD_CORREO_RELIANZ=...
 DASHBOARD_CLAVE_RELIANZ=...
 ```
 
-> ⚠️ Las contraseñas por defecto están en el repositorio y el sitio es público:
-> para producción escribe las cuatro variables `DASHBOARD_CLAVE_*` en el `.env`
-> (que no se sube a git). `DJANGO_DEBUG` por defecto está apagado, para que un
-> servidor sin la variable no muestre el código y las credenciales al primer
-> error.
+> ⚠️ Los correos y las contraseñas por defecto están en el repositorio y el
+> sitio es público: para producción escribe las ocho variables
+> `DASHBOARD_CORREO_*` y `DASHBOARD_CLAVE_*` en el `.env` (que no se sube a
+> git). `DJANGO_DEBUG` por defecto está apagado, para que un servidor sin la
+> variable no muestre el código y las credenciales al primer error.
+
+**Una variable de cuenta a medio llenar no arranca.** Dejar
+`DASHBOARD_CORREO_ADMIN=` (o la clave) sin valor abriría una cuenta a la que se
+entra con el campo vacío, y repetir un correo en dos cuentas le daría a una los
+permisos de la otra en silencio. `_catalogo_de` en `config/settings.py` revisa
+las cuatro cosas al arrancar y lanza `ImproperlyConfigured` diciendo cuál
+variable quedó mal; para volver al valor por defecto hay que **borrar** la
+línea, no dejarla vacía.
 
 ---
 
@@ -162,7 +174,7 @@ proyecto.
 | `/inicio/` | Portada pública (copia del sitio) | No |
 | `/entrar/` | Dirección vieja del login: redirige a `/` | No |
 | `/dashboard/` | Dashboard de ocupación | Sí |
-| `/mapa/` | Mapa de flota en vivo | Sí (solo `admin`) |
+| `/mapa/` | Mapa de flota en vivo | Sí (solo la cuenta de acceso total) |
 | `/api/dashboard/`, `/api/fleet/` | JSON de cada página | Sí |
 
 ---
@@ -171,22 +183,39 @@ proyecto.
 
 El dashboard entero (páginas y endpoints JSON) exige iniciar sesión en la raíz
 del sitio. El login y la portada son las únicas páginas que se ven sin sesión.
-No hay usuarios en base de datos: **el catálogo de usuarios es
+No hay usuarios en base de datos: **el catálogo de cuentas es
 `DASHBOARD_USUARIOS` en `config/settings.py`**, y ahí se agregan y se quitan.
 Tras 5 intentos fallidos desde la misma IP el login se bloquea 60 segundos.
 `/admin/` conserva su propio login de Django.
 
-### Usuarios y qué ve cada uno
+### Cuentas y qué ve cada una
 
-| Usuario | Contraseña | Ve los viajes de | Mapa `/mapa/` |
+**Se entra con el correo completo, no con un nombre de usuario.** Los correos
+de aquí abajo son los que trae el código por defecto, para desarrollo; en
+producción cada uno se cambia por el correo real de la persona con la variable
+`DASHBOARD_CORREO_*` correspondiente, sin tocar el código.
+
+**Puede ser cualquier correo**: no hay dominio privilegiado y `rastrelital.com`
+no tiene nada de especial. `jefe@procaps.com.co`, `samuel@gmail.com` o
+`coordinacion@transportes-del-caribe.com.co` sirven igual. Lo único que se
+exige es que lleve `@`, que es lo que hace honesto el aviso del login cuando
+alguien escribe todavía un nombre corto.
+
+| Correo (por defecto) | Contraseña | Ve los viajes de | Mapa `/mapa/` |
 |---|---|---|---|
-| `admin` | `Admin` | Todas las empresas | Sí |
-| `procaps` | `Procaps` | PROCAPS + Sin identificar | No |
-| `ditar` | `Ditar` | DITAR + Sin identificar | No |
-| `relianz` | `relianz` | RELIANZ + Sin identificar | No |
+| `admin@rastrelital.com` | `Admin` | Todas las empresas | Sí |
+| `procaps@rastrelital.com` | `Procaps` | PROCAPS + Sin identificar | No |
+| `ditar@rastrelital.com` | `Ditar` | DITAR + Sin identificar | No |
+| `relianz@rastrelital.com` | `relianz` | RELIANZ + Sin identificar | No |
 
-El nombre de usuario **no** distingue mayúsculas (`Procaps` = `procaps`); la
-contraseña **sí**.
+El correo **no** distingue mayúsculas ni espacios de sobra
+(`  Procaps@Rastrelital.com ` = `procaps@rastrelital.com`); la contraseña
+**sí**. En la barra del dashboard se muestra lo que va antes del `@`, y el
+correo completo queda en el `title` de esa píldora.
+
+> Los nombres cortos de antes (`admin`, `procaps`, `ditar`, `relianz`) **ya no
+> sirven para entrar**. Quien escriba uno recibe un aviso de que ahora va el
+> correo completo, y ese intento cuenta igual para el bloqueo por IP.
 
 **Los viajes sin empresa se muestran en todas las ventanas.** La pestaña «Sin
 identificar» se le agrega a todo usuario, porque ahí cae lo que no se pudo
@@ -208,15 +237,20 @@ Ocultar la pestaña no protege nada por sí solo: la URL del JSON se puede
 escribir a mano. Por eso el techo del usuario se le pasa siempre a
 `services.range_summary`.
 
-Para agregar un usuario nuevo basta con una línea en `DASHBOARD_USUARIOS`:
+Para agregar una cuenta nueva basta con una línea en `_CUENTAS`, la tabla de
+la que sale `DASHBOARD_USUARIOS`:
 
 ```python
-'nuevo': {'clave': os.getenv('DASHBOARD_CLAVE_NUEVO', 'clave'),
-          'empresas': ('PROCAPS', 'DITAR')},   # None = acceso total
+# (sufijo de las variables, correo por defecto, clave por defecto, empresas)
+('NUEVO', 'nuevo@rastrelital.com', 'clave', ('PROCAPS', 'DITAR')),
+#                                            None = acceso total
 ```
 
+Con eso la cuenta queda configurable desde el `.env` con
+`DASHBOARD_CORREO_NUEVO` y `DASHBOARD_CLAVE_NUEVO`.
+
 **La sesión dura lo que dure la pestaña.** Al cerrarla (o cerrar el navegador)
-hay que volver a escribir usuario y contraseña; recargar o navegar dentro de la
+hay que volver a escribir correo y contraseña; recargar o navegar dentro de la
 misma pestaña no molesta. Son dos piezas: la cookie va sin fecha de vencimiento
 (`SESSION_EXPIRE_AT_BROWSER_CLOSE`), y el bloque `guardia_pestana` de
 `base.html` sella la pestaña en `sessionStorage`, que es lo único que el
@@ -224,7 +258,7 @@ navegador borra al cerrarla. Consecuencia a tener en cuenta: **abrir el
 dashboard en una segunda pestaña cierra la sesión de las dos**, porque la
 pestaña nueva no trae sello y no hay forma de distinguirla de una reabierta.
 
-Mientras el usuario escribe su contraseña, el servidor **precalienta en
+Mientras la persona escribe su contraseña, el servidor **precalienta en
 segundo plano** las consultas al API del último mes, para adelantar trabajo
 antes de que la persona elija un rango.
 
@@ -234,8 +268,10 @@ antes de que la persona elija un rango.
 python manage.py test
 ```
 
-71 pruebas que **no tocan la red**: el API se simula con `mock`, así que corren
-sin credenciales y en un par de segundos.
+125 pruebas que **no tocan la red**: el API se simula con `mock`, así que
+corren sin credenciales y en un par de segundos. El catálogo de cuentas también
+va fijado en la suite (`CATALOGO` en `tracking/tests.py`), así que las pruebas
+no dependen de lo que cada `.env` tenga escrito.
 
 ---
 

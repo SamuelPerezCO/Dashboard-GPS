@@ -1,8 +1,9 @@
 """Sesión del dashboard: quién entró y qué puede ver.
 
 No hay usuarios en base de datos; el catálogo es DASHBOARD_USUARIOS en
-settings, y los permisos se releen de ahí en cada petición para que
-quitarle el acceso a alguien surta efecto de inmediato.
+settings, indexado por el correo con el que cada quien entra, y los
+permisos se releen de ahí en cada petición para que quitarle el acceso a
+alguien surta efecto de inmediato.
 """
 
 from django.conf import settings
@@ -17,8 +18,17 @@ CLAVE_LOGIN_NUEVO = 'login_recien_hecho'
 
 
 def nombre_usuario(request):
-    """Usuario de la sesión, o cadena vacía si no hay nadie."""
+    """Correo del usuario de la sesión, o cadena vacía si no hay nadie."""
     return request.session.get(CLAVE_USUARIO) or ''
+
+
+def nombre_visible(request):
+    """Cómo se nombra al usuario en la barra: lo que va antes del '@'.
+
+    En la sesión el usuario es su correo completo, que no cabe en la píldora
+    de la cabecera; el correo entero se queda en el `title`.
+    """
+    return nombre_usuario(request).split('@')[0]
 
 
 def cuenta_actual(request):

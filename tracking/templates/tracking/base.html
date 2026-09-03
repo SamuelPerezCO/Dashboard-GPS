@@ -204,7 +204,7 @@
     <span id="estado"></span>
   </div>
   {% if usuario %}
-  <span class="usuario" title="Sesión iniciada como {{ usuario }}">
+  <span class="usuario" title="Sesión iniciada como {{ correo|default:usuario }}">
     <span class="punto" aria-hidden="true"></span>{{ usuario }}
   </span>
   {% endif %}
