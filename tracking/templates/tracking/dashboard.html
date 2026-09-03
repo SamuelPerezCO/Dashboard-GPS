@@ -108,9 +108,9 @@
   .viz .pt    { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 1.5; }
   .viz .bar   { fill: var(--series-1); }
 
-  /* Ocupación por encima de ~100%: el denominador (servicios detectados)
-     no es creíble, no es que el bus haya ido sobrecupado. La barra toca el
-     tope del panel en vez de estirar la escala, y el color avisa que la
+  /* Ocupación por encima de ~100%: subieron más pasajeros que asientos en
+     un solo viaje, así que alguno de los dos insumos está mal. La barra toca
+     el tope del panel en vez de estirar la escala, y el color avisa que la
      cifra real (visible en la etiqueta y el tooltip) no se puede tomar
      al pie de la letra. */
   .viz .bar-sospechoso { fill: var(--critical); }
@@ -217,7 +217,7 @@
 
 <div class="grid-2">
 <div class="card">
-  <h2>Total Servicios</h2>
+  <h2>Total Servicios (viajes)</h2>
   <div class="viz" id="chart-servicios"></div>
 </div>
 
@@ -292,8 +292,8 @@
   // Por encima de esto la ocupación es físicamente imposible (más pasajeros
   // que asientos por viaje): el mismo umbral que ya usa
   // `auditar_servicios.py` para marcar una unidad como sospechosa. Cuando se
-  // pasa, el problema casi siempre es que faltaron alertas de geocerca, no
-  // que el bus haya ido sobrecupado.
+  // pasa, o dos viajes seguidos se contaron como uno solo, o la capacidad
+  // que tenemos anotada para ese bus no es la real.
   const UMBRAL_OCUPACION_IMPOSIBLE = 100;
 
   // Días activos por interno, contando un día como activo si el bus
@@ -481,21 +481,11 @@
   function revisarVacio() {
     if (!datos) { notaVacia.classList.remove('visible'); return; }
     const etiqueta = (datos.etiquetas || {})[datos.empresa] || datos.empresa;
-    const totalServicios = datos.vehiculos.reduce((a, v) => a + v.servicios, 0);
     const totalTimbradas = datos.vehiculos.reduce((a, v) => a + v.timbradas, 0);
     const inferidas = datos.timbradas_inferidas || 0;
-    const etiquetaTurno = (datos.etiquetas_turno || {})[datos.turno] || '';
     let msg = '';
 
-    if (datos.turno && totalServicios === 0 && totalTimbradas > 0) {
-      msg = `<b>Hay timbradas en el turno de ${etiquetaTurno.toLowerCase()}, pero ningún servicio.</b> ` +
-            `Subieron ${fmt(totalTimbradas)} pasajeros dentro de esa franja, y aun así ` +
-            `ningún bus registró entrada a una geocerca${datos.empresa ? ' de ' + etiqueta : ''} ` +
-            `en ese horario. La ocupación se calcula timbradas ÷ servicios ÷ capacidad, ` +
-            `así que sin servicios no hay con qué dividir: «Ocupación real» y ` +
-            `«Capacidad total» se quedan vacías y el promedio de la flota queda en «—». ` +
-            `Los conteos de «Total Timbradas» sí son reales.`;
-    } else if (datos.empresa === 'SIN-IDENTIFICAR') {
+    if (datos.empresa === 'SIN-IDENTIFICAR') {
       msg = `<b>Esto es una deducción, no una medición.</b> Aquí cae todo lo que ` +
             `no se pudo atribuir a una empresa: ${fmt(totalTimbradas)} timbradas de ` +
             `buses que ese día no registraron entrada a ninguna geocerca con nombre ` +
@@ -504,16 +494,17 @@
             `viajes de PROCAPS cuya entrada no quedó registrada. Al crear las ` +
             `geocercas de DITAR y RELIANZ, estas timbradas se reparten solas entre ` +
             `cada empresa.`;
-    } else if ((datos.empresa === 'DITAR' || datos.empresa === 'RELIANZ') && totalServicios === 0) {
+    } else if ((datos.empresa === 'DITAR' || datos.empresa === 'RELIANZ') && totalTimbradas === 0) {
       msg = `<b>Todavía no existe la geocerca de ${etiqueta} en la plataforma.</b> ` +
             `La empresa de cada servicio se reconoce por el nombre de la geocerca en ` +
             `la que entra el bus, así que mientras no se cree la de ${etiqueta} esta ` +
             `vista se queda en cero y sus timbradas se ven en ` +
             `<b>Sin identificar</b> (${fmt(inferidas)} en este rango). En cuanto la ` +
             `geocerca exista y se llame «${etiqueta}», esta vista se llena sola.`;
-    } else if (datos.empresa && totalServicios === 0) {
-      msg = `<b>Sin servicios de ${etiqueta} en este rango.</b> Los servicios se ` +
-            `cuentan cuando el bus entra a una geocerca de la empresa.`;
+    } else if (datos.empresa && totalTimbradas === 0) {
+      msg = `<b>Sin viajes de ${etiqueta} en este rango.</b> Un viaje se le ` +
+            `atribuye a la empresa por la geocerca en la que entra el bus, así ` +
+            `que aquí solo salen los que cruzaron una geocerca de ${etiqueta}.`;
     }
 
     notaVacia.innerHTML = msg;
@@ -593,10 +584,13 @@
       if (v.ocupacion <= UMBRAL_OCUPACION_IMPOSIBLE) return null;
       sospechososOcupacion.add(v.interno);
       const activos = diasActivos.get(v.interno) || 0;
-      return `Ocupación no confiable: solo ${fmt(v.servicios)} servicio` +
-             `${v.servicios === 1 ? '' : 's'} detectado${v.servicios === 1 ? '' : 's'} en ` +
-             `${fmt(activos)} días activos. Es más probable que falten alertas de ` +
-             `geocerca a que el bus haya ido sobrecupado.`;
+      const porViaje = v.servicios ? v.timbradas / v.servicios : 0;
+      return `Ocupación no confiable: ${fmtDec(porViaje, 1)} pasajeros por viaje en ` +
+             `un bus de ${fmt(v.capacidad)} asientos ` +
+             `(${fmt(v.timbradas)} timbradas en ${fmt(v.servicios)} viaje` +
+             `${v.servicios === 1 ? '' : 's'}, ${fmt(activos)} días activos). ` +
+             `O dos viajes seguidos se contaron como uno, o la capacidad ` +
+             `anotada para este bus no es la real.`;
     });
     pintarGrafica(document.getElementById('chart-ocupacion'),
                   conCap.map(v => v.interno),
@@ -617,7 +611,7 @@
     document.querySelector('#tabla-detalle thead').innerHTML =
       '<tr><th>Fecha</th>' + datos.detalle.internos.map(p => {
         const marca = sospechososOcupacion.has(p)
-          ? ` <span class="marca-sospechoso" title="Ocupación calculada no confiable: pocos servicios detectados frente a los días activos. Ver «Ocupación real por vehículo».">⚠</span>`
+          ? ` <span class="marca-sospechoso" title="Ocupación calculada no confiable: más pasajeros por viaje que asientos tiene el bus. Ver «Ocupación real por vehículo».">⚠</span>`
           : '';
         return `<th class="num">${p}${marca}</th>`;
       }).join('') + '</tr>';

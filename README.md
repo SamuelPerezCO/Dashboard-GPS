@@ -3,9 +3,9 @@
 Dashboard de ocupación de pasajeros para la flota de **Expreso Brasilia** (35
 buses), construido sobre el WebService de **Service24GPS**.
 
-Responde una pregunta: *¿qué tan llenos van los buses?* Cruza las entradas a
-geocerca (los "servicios") con los timbrados de iButton (los pasajeros que
-suben) y calcula la ocupación por vehículo, por empresa y por día.
+Responde una pregunta: *¿qué tan llenos van los buses?* Cruza los viajes (los
+"servicios") con los timbrados de iButton (los pasajeros que suben) y calcula
+la ocupación por vehículo, por empresa y por día.
 
 ---
 
@@ -23,8 +23,8 @@ De ahí sale todo el modelo:
 
 | Concepto | De dónde sale |
 |---|---|
-| **Servicio** (un viaje) | Alerta de *entrada* a una geocerca. Las salidas se descartan. |
-| **Empresa** | Nombre de la geocerca (`PROCAPS`, `DITAR`, `RELIANZ`). |
+| **Servicio** (un viaje) | Una tanda de timbradas seguidas: si el bus pasa más de 25 minutos sin que nadie timbre, lo que venga después es otro viaje. |
+| **Empresa** | Nombre de la geocerca (`PROCAPS`, `DITAR`, `RELIANZ`) en la que entra el bus. |
 | **Timbrada** (un pasajero) | Evento `2720` del historial, con el `iButton_ID`. |
 | **Capacidad** | Tabla fija por interno en `services.py` (lista física de la flota). |
 | **Tipo de vehículo** | La misma tabla: buseta, busetón o bus. Filtra la flota entera, no los viajes. |
@@ -39,8 +39,36 @@ Es decir, pasajeros promedio por viaje ÷ asientos. Los buses sin capacidad
 conocida o sin servicios registrados quedan fuera del promedio en vez de entrar
 como cero, para no ensuciarlo.
 
-Como una timbrada no dice a qué empresa pertenece, se le atribuye la del
-**siguiente servicio** de ese mismo bus ese día.
+Como una timbrada no dice a qué empresa pertenece, se le atribuye la de la
+**siguiente entrada a geocerca** de ese mismo bus ese día.
+
+### Por qué un servicio se cuenta por timbradas y no por geocercas
+
+Contar los servicios como entradas a geocerca daba una ocupación al doble de la
+real. Un día normal de un bus son hasta seis viajes —tres turnos por dos
+sentidos— pero solo la mitad entra a una geocerca:
+
+```
+04:33-05:13  suben 12 en sus casas   ─┐ viaje 1
+05:40        ENTRA A PROCAPS          ─┘ (sí dispara geocerca)
+06:13-06:22  suben 6 en la planta    ─┐ viaje 2
+             (terminan en sus casas)  ─┘ (no dispara: no hay geocerca allá)
+```
+
+Los viajes que *salen* de la planta a dejar gente en su casa no cruzan ninguna
+geocerca, pero sus pasajeros sí timbran. El numerador los contaba y el
+denominador no, así que la ocupación salía inflada —hasta 291 % en un caso, más
+pasajeros que asientos—. Las timbradas, en cambio, están en todos los viajes:
+sin pasajeros no hay viaje que medir.
+
+El corte de 25 minutos (`HUECO_ENTRE_SERVICIOS` en `services.py`) se midió
+sobre el mes completo: es el más angosto que todavía respeta el techo de seis
+viajes al día, y por encima empiezan a aparecer tandas con más pasajeros que
+asientos, o sea dos viajes contados como uno.
+
+Las entradas a geocerca se siguen contando aparte, en `entradas_geocerca`,
+porque son las que dicen a qué empresa pertenece cada viaje y las que delatan
+una geocerca mal puesta en la plataforma (`manage.py auditar_servicios`).
 
 ### La pestaña «Sin identificar»
 

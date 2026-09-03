@@ -215,6 +215,43 @@ class FranjaDeHorasTests(TestCase):
                          'Horas 04:00 – 11:59')
 
 
+class ContarServiciosTests(TestCase):
+    """Un servicio es una tanda de timbradas separada de la siguiente."""
+
+    @staticmethod
+    def _t(*horas, fecha='2026-07-20'):
+        return [{'fecha': fecha, 'hora': h} for h in horas]
+
+    def test_sin_timbradas_no_hay_viajes(self):
+        self.assertEqual(services._contar_servicios([]), 0)
+
+    def test_las_timbradas_seguidas_son_un_solo_viaje(self):
+        self.assertEqual(services._contar_servicios(
+            self._t('04:10:00', '04:35:00', '04:55:00')), 1)
+
+    def test_un_silencio_largo_abre_otro_viaje(self):
+        self.assertEqual(services._contar_servicios(
+            self._t('04:10:00', '05:05:00')), 2)
+
+    def test_el_hueco_justo_todavia_es_el_mismo_viaje(self):
+        limite = services.HUECO_ENTRE_SERVICIOS
+        self.assertEqual(services._contar_servicios(
+            self._t('04:00:00', f'04:{limite:02d}:00')), 1)
+        self.assertEqual(services._contar_servicios(
+            self._t('04:00:00', f'04:{limite + 1:02d}:00')), 2)
+
+    def test_no_le_importa_en_que_orden_lleguen(self):
+        self.assertEqual(services._contar_servicios(
+            self._t('06:15:00', '04:10:00', '04:20:00')), 2)
+
+    def test_cada_dia_cuenta_por_su_lado(self):
+        self.assertEqual(services._contar_servicios(
+            self._t('05:00:00') + self._t('05:00:00', fecha='2026-07-21')), 2)
+
+    def test_las_timbradas_sin_hora_no_cuentan(self):
+        self.assertEqual(services._contar_servicios(self._t('', 'a deshoras')), 0)
+
+
 @patch.object(services.api_client, 'get_alerts')
 @patch.object(services.api_client, 'get_vehicles')
 @patch.object(services.api_client, 'get_passenger_events')
@@ -233,14 +270,18 @@ class RangeSummaryTests(TestCase):
         vehiculos.return_value = self.VEHICULOS
         alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
                                 _alerta('100', '14:00:00', 'PROCAPS')]
+        # Dos tandas de timbradas, o sea dos viajes: 15 pasajeros suben
+        # alrededor de las 08:30 y 16 alrededor de las 14:30.
         eventos.side_effect = lambda equipo, *a, **k: (
-            [{'fecha': '2026-07-20', 'hora': '08:30:00', 'pasajero': 'a'}] * 31
+            [{'fecha': '2026-07-20', 'hora': '08:30:00', 'pasajero': 'a'}] * 15
+            + [{'fecha': '2026-07-20', 'hora': '14:30:00', 'pasajero': 'b'}] * 16
             if equipo == '100' else [])
 
         r = services.range_summary('2026-07-20', '2026-07-20')
 
         por_interno = {v['interno']: v for v in r['vehiculos']}
         self.assertEqual(por_interno['INT 7076']['servicios'], 2)
+        self.assertEqual(por_interno['INT 7076']['entradas_geocerca'], 2)
         self.assertEqual(por_interno['INT 7076']['timbradas'], 31)
         self.assertEqual(por_interno['INT 7076']['capacidad'], 30)
         self.assertEqual(por_interno['INT 7076']['ocupacion'], 51.67)
@@ -270,7 +311,8 @@ class RangeSummaryTests(TestCase):
         alertas.return_value = [_alerta('100', '08:00:00', 'PROCAPS'),
                                 _alerta('100', '14:00:00', 'PROCAPS')]
         eventos.side_effect = lambda equipo, *a, **k: (
-            [{'fecha': '2026-07-20', 'hora': '08:30:00', 'pasajero': 'a'}] * 58)
+            [{'fecha': '2026-07-20', 'hora': '08:30:00', 'pasajero': 'a'}] * 29
+            + [{'fecha': '2026-07-20', 'hora': '14:30:00', 'pasajero': 'b'}] * 29)
 
         r = services.range_summary('2026-07-20', '2026-07-20')
 
@@ -434,6 +476,59 @@ class RangeSummaryTests(TestCase):
 
         bus = r['vehiculos'][0]
         self.assertEqual((bus['servicios'], bus['timbradas']), (0, 0))
+
+    def test_un_servicio_es_una_tanda_de_timbradas(self, eventos, vehiculos,
+                                                   alertas):
+        """Las timbradas seguidas son un viaje; un silencio largo abre otro."""
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = []
+        eventos.side_effect = lambda equipo, *a, **k: [
+            {'fecha': '2026-07-20', 'hora': h, 'pasajero': 'a'} for h in (
+                # Un viaje: la gente va subiendo con huecos de 25 y 20 minutos.
+                '04:10:00', '04:35:00', '04:55:00',
+                # Otro: el bus estuvo quieto 75 minutos.
+                '06:10:00', '06:20:00',
+            )]
+
+        r = services.range_summary('2026-07-20', '2026-07-20')
+
+        self.assertEqual(r['vehiculos'][0]['servicios'], 2)
+
+    def test_los_viajes_sin_geocerca_tambien_cuentan(self, eventos, vehiculos,
+                                                     alertas):
+        """El caso que inflaba la ocupación al doble.
+
+        El bus recoge en las casas y deja en la planta (eso sí entra a
+        PROCAPS), y enseguida carga a los que salen de turno y los lleva a su
+        casa: ese segundo viaje no entra a ninguna geocerca porque termina en
+        las casas de la gente. Contando entradas eran 30 pasajeros en un solo
+        servicio; contando tandas son dos viajes, que es lo que pasó.
+        """
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = [_alerta('100', '05:40:00', 'PROCAPS')]
+        eventos.side_effect = lambda equipo, *a, **k: (
+            [{'fecha': '2026-07-20', 'hora': '04:30:00', 'pasajero': 'a'}] * 15
+            + [{'fecha': '2026-07-20', 'hora': '06:15:00', 'pasajero': 'b'}] * 15)
+
+        r = services.range_summary('2026-07-20', '2026-07-20')
+
+        bus = r['vehiculos'][0]
+        self.assertEqual(bus['entradas_geocerca'], 1)
+        self.assertEqual((bus['servicios'], bus['timbradas']), (2, 30))
+        self.assertEqual(bus['ocupacion'], 50.0)
+
+    def test_los_viajes_se_cuentan_por_dia(self, eventos, vehiculos, alertas):
+        """Una tanda en cada día son dos viajes, no uno partido en dos."""
+        vehiculos.return_value = self.VEHICULOS[:1]
+        alertas.return_value = []
+        eventos.side_effect = lambda equipo, *a, **k: [
+            {'fecha': '2026-07-20', 'hora': '05:00:00', 'pasajero': 'a'},
+            {'fecha': '2026-07-21', 'hora': '05:00:00', 'pasajero': 'b'},
+        ]
+
+        r = services.range_summary('2026-07-20', '2026-07-21')
+
+        self.assertEqual(r['vehiculos'][0]['servicios'], 2)
 
     def test_el_detalle_trae_una_fila_por_dia(self, eventos, vehiculos, alertas):
         vehiculos.return_value = self.VEHICULOS[:1]

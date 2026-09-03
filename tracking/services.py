@@ -1,7 +1,7 @@
 """Lógica del dashboard: servicios, timbradas y ocupación por bus.
 
-Un servicio es una entrada a geocerca y una timbrada es un pasajero que
-sube; la ocupación cruza las dos contra la capacidad del bus.
+Una timbrada es un pasajero que sube y un servicio es un viaje; la
+ocupación cruza las dos contra la capacidad del bus.
 """
 
 import html
@@ -424,6 +424,55 @@ def _servicio_de_timbrada(hora, servicios_del_bus):
     return empresa, geocerca
 
 
+# Minutos de silencio que separan un viaje del siguiente. Los pasajeros
+# timbran al subir, uno tras otro, mientras el bus recorre la ruta: dentro de
+# un viaje las timbradas se pisan (el 96% llega a menos de 15 minutos de la
+# anterior) y entre un viaje y el otro el bus se queda quieto mucho más. El
+# valle entre las dos cosas es ancho y plano —casi no hay huecos de 20 a 44
+# minutos—, así que el corte se eligió midiendo el mes completo
+# (2026-08-01/25, 20 buses con capacidad conocida, 383 días-bus):
+#
+#   - Por debajo de 25 empiezan a aparecer días de 7 y 8 viajes, y la
+#     operación no tiene tantos: son 3 turnos por 2 sentidos, 6 como mucho.
+#   - Por encima de 25 crecen las tandas con más pasajeros que asientos, que
+#     son dos viajes contados como uno: 6 tandas con 25, 13 con 30, 18 con
+#     35, 21 con 40.
+#
+# 25 es el corte más angosto que todavía respeta el techo de 6 viajes al día.
+HUECO_ENTRE_SERVICIOS = 25
+
+
+def _contar_servicios(timbradas):
+    """Cuántos viajes representan estas timbradas.
+
+    Un viaje es una tanda de timbradas seguidas. Antes el denominador salía
+    de las entradas a geocerca, pero la única geocerca que existe (PROCAPS)
+    solo cubre la mitad de la operación: los viajes que *salen* de la planta
+    a dejar gente en su casa no entran a ninguna geocerca y no se contaban,
+    así que la ocupación salía al doble. Las timbradas, en cambio, están en
+    todos los viajes — sin pasajeros no hay viaje que medir.
+
+    Se cuenta día por día: la timbrada trae fecha y hora por separado, y
+    ninguna tanda cruza la medianoche (entre las 23:00 y las 3:00 no se
+    timbra).
+
+    Returns:
+        El número de tandas. Las timbradas sin hora utilizable no cuentan:
+        no hay dónde ponerlas y estirarían el denominador.
+    """
+    por_dia = defaultdict(list)
+    for t in timbradas:
+        minutos = minutos_de_hora(t['hora'])
+        if minutos is not None:
+            por_dia[t['fecha']].append(minutos)
+    total = 0
+    for minutos in por_dia.values():
+        minutos.sort()
+        total += 1 + sum(1 for antes, despues in zip(minutos, minutos[1:])
+                         if despues - antes > HUECO_ENTRE_SERVICIOS)
+    return total
+
+
 def _timbradas_de_vehiculo(equipo, desde, hasta_efectivo, hoy,
                            primer_dia_mes, dentro_del_mes):
     """Timbradas de un bus en el rango, con el cache que más convenga.
@@ -463,9 +512,12 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
     """Ocupación del rango: por bus, por día y de la flota entera.
 
     La ocupación de un bus es timbradas / (servicios × capacidad): pasajeros
-    promedio por viaje sobre los asientos que tiene. Los buses sin capacidad
-    conocida o sin servicios quedan fuera del promedio en vez de entrar como
-    cero y ensuciarlo.
+    promedio por viaje sobre los asientos que tiene. Los servicios se cuentan
+    con `_contar_servicios`, es decir por tandas de timbradas y no por
+    entradas a geocerca; la cuenta de entradas se sigue devolviendo aparte,
+    en `entradas_geocerca`, porque es lo que delata una geocerca mal puesta
+    en la plataforma. Los buses sin capacidad conocida o sin servicios quedan
+    fuera del promedio en vez de entrar como cero y ensuciarlo.
 
     Args:
         desde, hasta: Rango en YYYY-MM-DD. Si vienen vacíos se consulta hoy,
@@ -514,7 +566,7 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
     servicios_por_dia = _en_paralelo(
         lambda d: _servicios_del_dia(d, d == hoy), dias_consultables)
 
-    servicios = Counter()
+    entradas_geocerca = Counter()
     servicios_bus_dia = defaultdict(list)
     # Rutas que aparecieron en el rango, para llenar el selector. Se juntan
     # antes de recortar por ruta y por franja: si se armara con lo ya filtrado,
@@ -536,7 +588,7 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
             if ruta and _norm_ruta(s['geocerca']) != ruta:
                 continue
             if en_tabs:
-                servicios[s['equipo']] += 1
+                entradas_geocerca[s['equipo']] += 1
 
     lecturas = _en_paralelo(
         lambda veh: _timbradas_de_vehiculo(
@@ -572,7 +624,7 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
                         if _norm_ruta(geo) == ruta]
 
         timbradas = len(ev_rango)
-        n_servicios = servicios.get(str(equipo), 0)
+        n_servicios = _contar_servicios(ev_rango)
         clave_interno = _norm_interno(interno)
         capacidad = CAPACIDAD_POR_INTERNO.get(clave_interno)
         if capacidad and n_servicios:
@@ -585,6 +637,7 @@ def range_summary(desde=None, hasta=None, empresa=None, permitidas=None, turno=N
             'equipo': equipo,
             'tipo': TIPO_POR_INTERNO.get(clave_interno),
             'servicios': n_servicios,
+            'entradas_geocerca': entradas_geocerca.get(str(equipo), 0),
             'timbradas': timbradas,
             'capacidad': capacidad,
             'ocupacion': ocupacion,

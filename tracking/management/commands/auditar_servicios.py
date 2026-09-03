@@ -1,13 +1,14 @@
-"""Audita la detección de servicios: encuentra los buses cuyo denominador miente.
+"""Audita las geocercas: encuentra los buses a los que la geocerca no dispara.
 
-La ocupación es timbradas / (servicios × capacidad). El numerador viene de las
-timbradas del bus y el denominador de las alertas de entrada a geocerca. Cuando
-la geocerca no está configurada, o el GPS se cayó, o la alerta no está activa,
-el servicio no se registra: el numerador se queda entero y el denominador se
-encoge, así que la ocupación se dispara.
+La ocupación es timbradas / (servicios × capacidad), y desde que los servicios
+se cuentan por tandas de timbradas el denominador ya no depende de la geocerca.
+Pero la geocerca sigue siendo lo único que dice a qué empresa pertenece cada
+viaje, así que una que no dispara sigue siendo un problema: sus timbradas caen
+en «Sin identificar».
 
-Este comando no arregla nada. Solo señala en qué unidades el denominador no es
-creíble, para saber si el problema es de un bus o de una ruta entera.
+Este comando no arregla nada, y lo que señala casi nunca se arregla en el
+código: se arregla en la plataforma de Service24GPS, moviendo o creando la
+geocerca. Sirve para saber si el que falla es un bus o una ruta entera.
 
 Uso:
     python manage.py auditar_servicios
@@ -23,23 +24,24 @@ from django.core.management.base import BaseCommand, CommandError
 
 from tracking import services
 
-# Un bus que llevó pasajeros ese día necesariamente hizo al menos un viaje.
-# Por debajo de este promedio de servicios por día activo el denominador ya
-# no representa los viajes reales.
+# Un bus que llevó pasajeros ese día necesariamente hizo al menos un viaje, y
+# ese viaje debería haber cruzado la geocerca de su empresa. Por debajo de este
+# promedio de entradas por día activo la geocerca no está cubriendo la ruta.
 UMBRAL_POR_DEFECTO = 1.0
 
 
 class Command(BaseCommand):
-    help = ('Lista las unidades cuya detección de servicios no cuadra con sus '
-            'timbradas (ocupación imposible, servicios de menos o ninguno).')
+    help = ('Lista las unidades a las que la geocerca les dispara menos veces '
+            'que los días que trabajaron (o ninguna), y las que aun así '
+            'quedan con una ocupación imposible.')
 
     def add_arguments(self, parser):
         parser.add_argument('--desde', help='YYYY-MM-DD. Por defecto, el último mes.')
         parser.add_argument('--hasta', help='YYYY-MM-DD. Por defecto, hoy.')
         parser.add_argument(
             '--umbral', type=float, default=UMBRAL_POR_DEFECTO,
-            help=f'Servicios por día activo por debajo del cual se marca la '
-                 f'unidad (por defecto {UMBRAL_POR_DEFECTO}).')
+            help=f'Entradas a geocerca por día activo por debajo del cual se '
+                 f'marca la unidad (por defecto {UMBRAL_POR_DEFECTO}).')
         parser.add_argument('--csv', help='Escribe el resultado completo a un CSV.')
         parser.add_argument(
             '--todas', action='store_true',
@@ -74,8 +76,9 @@ class Command(BaseCommand):
         """Una fila por unidad, con su diagnóstico.
 
         `días activos` sale del detalle diario: un día cuenta como activo si el
-        bus registró al menos una timbrada. Es el piso duro del denominador,
-        porque para timbrar hay que haber hecho el viaje.
+        bus registró al menos una timbrada. Es el piso duro de las entradas a
+        geocerca que deberían haberse visto, porque para timbrar hay que haber
+        hecho el viaje.
         """
         internos = datos['detalle']['internos']
         dias_activos = defaultdict(int)
@@ -90,15 +93,17 @@ class Command(BaseCommand):
             interno = v['interno']
             activos = dias_activos.get(interno, 0)
             servicios = v['servicios']
+            entradas = v['entradas_geocerca']
             timbradas = v['timbradas']
-            por_dia = round(servicios / activos, 2) if activos else None
+            por_dia = round(entradas / activos, 2) if activos else None
             por_servicio = round(timbradas / servicios, 1) if servicios else None
 
             diagnostico = []
-            if timbradas and not servicios:
-                diagnostico.append('SIN SERVICIOS')
-            elif activos and servicios < activos:
-                diagnostico.append(f'{servicios} servicios en {activos} días activos')
+            if timbradas and not entradas:
+                diagnostico.append('SIN GEOCERCA')
+            elif activos and entradas < activos:
+                diagnostico.append(f'{entradas} entradas de geocerca en '
+                                   f'{activos} días activos')
             if v['ocupacion'] is not None and v['ocupacion'] > 100:
                 diagnostico.append(f"ocupación {v['ocupacion']}%")
             if (v['capacidad'] and por_servicio
@@ -112,14 +117,15 @@ class Command(BaseCommand):
                 'capacidad': v['capacidad'],
                 'timbradas': timbradas,
                 'servicios': servicios,
+                'entradas_geocerca': entradas,
                 'dias_activos': activos,
-                'serv_por_dia': por_dia,
+                'entradas_por_dia': por_dia,
                 'pasajeros_por_servicio': por_servicio,
                 'ocupacion': v['ocupacion'],
                 'diagnostico': '; '.join(diagnostico),
             })
 
-        filas.sort(key=lambda f: (f['serv_por_dia'] if f['serv_por_dia'] is not None
+        filas.sort(key=lambda f: (f['entradas_por_dia'] if f['entradas_por_dia'] is not None
                                   else 999, -f['timbradas']))
         return filas
 
@@ -150,18 +156,20 @@ class Command(BaseCommand):
         self.stdout.write(f'\nAuditoría de servicios · {desde} a {hasta}\n')
         if not filas:
             self.stdout.write(self.style.SUCCESS(
-                'Ninguna unidad sospechosa: todas registran al menos un '
-                'servicio por día activo.'))
+                'Ninguna unidad sospechosa: a todas les dispara la geocerca '
+                'al menos una vez por día activo.'))
             return
         cab = (f"{'Interno':<18}{'Ruta':<10}{'Cap':>4}{'Timbr':>7}{'Serv':>6}"
-               f"{'Días':>6}{'S/día':>7}{'Pas/serv':>9}{'Ocup%':>8}  Diagnóstico")
+               f"{'Geoc':>6}{'Días':>6}{'G/día':>7}{'Pas/serv':>9}{'Ocup%':>8}"
+               f"  Diagnóstico")
         self.stdout.write(cab)
         self.stdout.write('-' * len(cab))
         for f in filas:
             self.stdout.write(
                 f"{f['interno']:<18}{f['ruta'][:9]:<10}"
                 f"{self._n(f['capacidad']):>4}{f['timbradas']:>7}{f['servicios']:>6}"
-                f"{f['dias_activos']:>6}{self._n(f['serv_por_dia']):>7}"
+                f"{f['entradas_geocerca']:>6}{f['dias_activos']:>6}"
+                f"{self._n(f['entradas_por_dia']):>7}"
                 f"{self._n(f['pasajeros_por_servicio']):>9}"
                 f"{self._n(f['ocupacion']):>8}  "
                 + self.style.WARNING(f['diagnostico']))
@@ -181,19 +189,21 @@ class Command(BaseCommand):
 
     def _resumen(self, filas, sospechosas, umbral):
         bajo_umbral = [f for f in filas
-                       if f['serv_por_dia'] is not None and f['serv_por_dia'] < umbral]
-        sin_serv = [f for f in filas if f['timbradas'] and not f['servicios']]
+                       if f['entradas_por_dia'] is not None and f['entradas_por_dia'] < umbral]
+        sin_geo = [f for f in filas
+                   if f['timbradas'] and not f['entradas_geocerca']]
         self.stdout.write(
-            f'\n{len(sospechosas)} de {len(filas)} unidades con el denominador '
-            f'poco creíble.')
+            f'\n{len(sospechosas)} de {len(filas)} unidades con la geocerca '
+            f'mal cubierta.')
         self.stdout.write(
-            f'{len(bajo_umbral)} por debajo de {umbral} servicios por día activo; '
-            f'{len(sin_serv)} sin ningún servicio pese a tener timbradas.')
+            f'{len(bajo_umbral)} por debajo de {umbral} entradas de geocerca '
+            f'por día activo; {len(sin_geo)} sin ninguna pese a tener '
+            f'timbradas.')
 
     def _escribir_csv(self, ruta, filas):
         campos = ['interno', 'ruta', 'capacidad', 'timbradas', 'servicios',
-                  'dias_activos', 'serv_por_dia', 'pasajeros_por_servicio',
-                  'ocupacion', 'diagnostico']
+                  'entradas_geocerca', 'dias_activos', 'entradas_por_dia',
+                  'pasajeros_por_servicio', 'ocupacion', 'diagnostico']
         with open(ruta, 'w', newline='', encoding='utf-8-sig') as fh:
             w = csv.DictWriter(fh, fieldnames=campos)
             w.writeheader()
