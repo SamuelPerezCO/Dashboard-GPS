@@ -147,7 +147,7 @@ def acceso_temporal_view(request):
     request.session.cycle_key()
     request.session[CLAVE_SESION] = True
     request.session[CLAVE_USUARIO] = 'invitado'
-    request.session[CLAVE_LOGIN_NUEVO]
+    request.session[CLAVE_LOGIN_NUEVO] = True
     return redirect(destino)
 
 

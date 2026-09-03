@@ -699,6 +699,27 @@ class LoginTests(TestCase):
         self.client.post(salir)
         self.assertFalse(self.client.session.get(CLAVE_SESION))
 
+    def test_el_acceso_temporal_entra_como_invitado(self):
+        """El botón de entrar sin cuenta deja la sesión lista, no revienta.
+
+        Vale la pena el candado porque la vista pone la marca de «login
+        recién hecho» justo después de `cycle_key()`, con la sesión en
+        blanco: si en vez de escribirla alguien la lee, es un KeyError y un
+        500 en la cara de quien pulsa el botón.
+        """
+        r = self.client.post(reverse('tracking:acceso_temporal'), {})
+
+        self.assertRedirects(r, reverse('tracking:dashboard'),
+                             fetch_redirect_response=False)
+        self.assertTrue(self.client.session.get(CLAVE_SESION))
+        self.assertEqual(self.client.session.get(CLAVE_USUARIO), 'invitado')
+        self.assertTrue(self.client.session.get(views.CLAVE_LOGIN_NUEVO))
+
+    def test_el_acceso_temporal_no_sirve_por_get(self):
+        r = self.client.get(reverse('tracking:acceso_temporal'))
+        self.assertRedirects(r, self.login_url, fetch_redirect_response=False)
+        self.assertFalse(self.client.session.get(CLAVE_SESION))
+
     def test_freno_tras_varios_intentos_fallidos(self):
         for _ in range(views.MAX_INTENTOS):
             self.client.post(self.login_url, {'usuario': 'x', 'clave': 'y'})
