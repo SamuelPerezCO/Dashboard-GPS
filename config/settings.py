@@ -297,15 +297,32 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 #
-# Con DATABASE_URL puesto se usa Postgres (Supabase); ahí vive la flota (ver
-# tracking.models.FlotaVehiculo). Sin la variable queda sqlite, que basta para
-# desarrollo local sin credenciales de Supabase a mano.
+# Con DATABASE_URL puesto se usa el motor que diga la URL —el MySQL del
+# propio cPanel (`mysql://...@localhost/`) o el Postgres de Supabase
+# (`postgresql://...`)—; ahí viven las cuentas y la flota (ver
+# tracking.models). Sin la variable queda sqlite, que basta para desarrollo
+# local sin credenciales a mano.
 DATABASE_URL = os.getenv('DATABASE_URL', '')
 
 if DATABASE_URL:
+    # `ssl_require` es de Postgres: dj-database-url lo traduce a
+    # OPTIONS['sslmode'], y ese parámetro no existe en el conector de MySQL,
+    # que revienta con TypeError en la primera consulta. Con el MySQL de
+    # cPanel tampoco hace falta cifrar: la base está en la misma máquina
+    # (localhost) y el tráfico no sale a la red. Con Supabase sí, que viaja
+    # por internet, y por eso se decide mirando el esquema de la URL.
+    _es_postgres = DATABASE_URL.startswith(('postgres://', 'postgresql://'))
     DATABASES = {
         'default': dj_database_url.config(
-            default=DATABASE_URL, conn_max_age=600, ssl_require=True,
+            default=DATABASE_URL,
+            conn_max_age=600,
+            # Django reutiliza cada conexión durante conn_max_age, pero MySQL
+            # cierra por su cuenta las que llevan un rato ociosas
+            # (wait_timeout, que en hosting compartido suele estar bajo). Sin
+            # esto, Django agarraría una conexión ya muerta y la petición
+            # moriría con «MySQL server has gone away» sin motivo aparente.
+            conn_health_checks=True,
+            ssl_require=_es_postgres,
         ),
     }
 else:

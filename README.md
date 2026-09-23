@@ -369,8 +369,8 @@ el mismo WSGI de siempre.
 
 Las peticiones a la GPS API siguen sin tocar base de datos y la sesión del
 login sigue viajando en una cookie firmada. Lo que sí vive en base de datos
-son las cuentas del dashboard (`DashboardUsuario`), en el Postgres de
-Supabase.
+son las cuentas del dashboard (`DashboardUsuario`) y la flota
+(`FlotaVehiculo`).
 
 ### El formulario «Create Application»
 
@@ -429,9 +429,65 @@ completa, con ejemplos, está en `.env.example`.
 | `DJANGO_ALLOWED_HOSTS` | El dominio del hosting, separado por comas si hay varios. Si falta, Django contesta 400 a todo. |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | Los mismos dominios con `https://` delante. Si falta, el login contesta «CSRF verification failed». |
 | `DJANGO_FORCE_SCRIPT_NAME` | Solo si la aplicación **no** está en la raíz del dominio: `/dashboard` para `https://dominio.com/dashboard/`. Tiene que coincidir con el «Application URL» de cPanel. |
-| `DATABASE_URL` | Postgres de Supabase (usa el «Transaction pooler», puerto 6543). Sin ella cae a un sqlite suelto dentro del hosting. |
+| `DATABASE_URL` | La base. `mysql://usuario:clave@localhost:3306/base` para el MySQL de cPanel, o la URL del «Transaction pooler» (puerto 6543) de Supabase. Sin ella cae a un sqlite suelto dentro del hosting. |
 | `GPS_APIKEY`, `GPS_USERNAME`, `GPS_PASSWORD` | Acceso al WebService. |
 | `DASHBOARD_CORREO_ADMIN` + `DASHBOARD_CLAVE_ADMIN` | Opcionales, y van juntas: el acceso de emergencia para cuando la base no conteste. |
+
+### La base de datos
+
+El esquema de `DATABASE_URL` elige el motor, el driver y si se pide SSL. Las
+dos opciones funcionan sin tocar código:
+
+**MySQL del propio cPanel.** Es la opción cómoda cuando el hosting ya lo trae:
+está en la misma máquina, así que no depende de que el cortafuegos deje salir
+por un puerto raro —que es lo que suele tumbar un despliegue en hosting
+compartido—. Se crea en cPanel > «MySQL® Databases», en tres pasos:
+
+1. *Create New Database* — el nombre acaba con tu cuenta de prefijo
+   (`cuenta_dashboard`).
+2. *Add New User* — mismo prefijo (`cuenta_dashboard`).
+3. *Add User To Database* — con **ALL PRIVILEGES**. Este paso se olvida con
+   facilidad, y sin él `migrate` falla con «access denied» aunque la clave
+   esté bien escrita.
+
+```
+DATABASE_URL=mysql://cuenta_dashboard:CLAVE@localhost:3306/cuenta_dashboard
+```
+
+Si la clave lleva `@`, `:`, `/` o `#`, va percent-encoded (`@` es `%40`); si
+no, la URL se parte por donde no es y el host sale mal.
+
+**Postgres de Supabase.** Sigue valiendo igual, con la URL del «Transaction
+pooler» (puerto 6543). Solo con este motor pide Django el SSL, porque la
+conexión sale a internet; el MySQL de cPanel no lo necesita y su conector ni
+siquiera entiende el parámetro.
+
+### Si mysqlclient no compila
+
+`mysqlclient` es una extensión en C y necesita las cabeceras de MySQL para
+instalarse. En la mayoría de los cPanel están, pero si `pip install` se cae
+con «Can't find mysql_config» o similar, la salida es PyMySQL, que es Python
+puro y siempre instala:
+
+```bash
+pip install PyMySQL==1.1.1
+```
+
+Y en `config/__init__.py`:
+
+```python
+import pymysql
+
+# Django 6.0 exige mysqlclient 2.2.1+ y comprueba la versión del módulo que
+# encuentra como MySQLdb. PyMySQL habla el mismo protocolo pero se numera por
+# su cuenta (1.1.x), así que sin esta línea Django se niega a arrancar.
+pymysql.version_info = (2, 2, 7, 'final', 0)
+pymysql.install_as_MySQLdb()
+```
+
+Va en `config/__init__.py` y no en `passenger_wsgi.py` porque tiene que
+ejecutarse antes de que Django importe el backend, y eso pasa también en
+`manage.py migrate`, que no toca Passenger.
 
 ### Si va en una subcarpeta
 
