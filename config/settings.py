@@ -36,18 +36,52 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', '0') == '1'
 
-ALLOWED_HOSTS = [
+def _lista_de(variable, por_defecto):
+    """Los valores de una variable separados por comas, o `por_defecto`.
+
+    Args:
+        variable: Nombre de la variable de entorno, p. ej. 'DJANGO_ALLOWED_HOSTS'.
+        por_defecto: Lista que vale cuando la variable no está o está vacía.
+    """
+    crudo = os.getenv(variable, '')
+    return [x.strip() for x in crudo.split(',') if x.strip()] or por_defecto
+
+
+# Dominios que esta instalación acepta servir.
+#
+# El dominio lo decide el hosting, no el código, así que la lista sale de
+# DJANGO_ALLOWED_HOSTS (nombres separados por comas) y lo de abajo es solo el
+# valor por defecto. Con DJANGO_DEBUG=0 y el dominio fuera de la lista, Django
+# contesta 400 a todo: es el primer sitio donde mirar si el sitio recién
+# mudado no abre.
+ALLOWED_HOSTS = _lista_de('DJANGO_ALLOWED_HOSTS', [
     'localhost', '127.0.0.1',
     'dashboardgps.qd.je',
-    '.onrender.com',
-    '.vercel.app',
-]
+])
 
-CSRF_TRUSTED_ORIGINS = [
+# El origen completo (con https:// y el puerto si lo hubiera) de cada dominio.
+# Django lo compara contra la cabecera Origin de cada POST; si falta el
+# dominio nuevo, el login contesta «CSRF verification failed» aunque el correo
+# y la clave estén bien.
+CSRF_TRUSTED_ORIGINS = _lista_de('DJANGO_CSRF_TRUSTED_ORIGINS', [
     'https://dashboardgps.qd.je',
-    'https://*.onrender.com',
-    'https://*.vercel.app',
-]
+])
+
+# Subcarpeta en la que vive la aplicación cuando no está en la raíz del
+# dominio: '/dashboard' para https://dominio.com/dashboard/.
+#
+# Hay que ponerla siempre que la aplicación no esté en la raíz. Passenger
+# avisa de la subcarpeta por su cuenta (la variable SCRIPT_NAME de WSGI) y con
+# eso `reverse()`, `{% url %}` y los redirect ya salen bien, pero `{% static %}`
+# no: Django calcula STATIC_URL una sola vez, al cargar el WSGI, cuando
+# todavía no hay ninguna petición de la que sacar el prefijo, y se queda con
+# ese valor para siempre. Por eso la subcarpeta se dice aquí y no se adivina.
+#
+# Ponerla de más, con un Passenger que sí avisa, no duplica el prefijo: este
+# valor sustituye al que manda el servidor, no se le suma. Ponerla cuando la
+# aplicación está en la raíz sí rompe los enlaces, así que tiene que decir la
+# verdad.
+FORCE_SCRIPT_NAME = os.getenv('DJANGO_FORCE_SCRIPT_NAME', '').strip().rstrip('/') or None
 
 GPS_API_BASE_URL = os.getenv('GPS_API_BASE_URL', 'https://api.service24gps.com/api/v1')
 GPS_APIKEY = os.getenv('GPS_APIKEY', '')
@@ -155,6 +189,12 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 
+# La cookie se manda solo a la subcarpeta de la aplicación. Con el valor de
+# fábrica ('/'), dos aplicaciones distintas del mismo dominio —cosa normal en
+# un hosting compartido— se pisarían la sesión la una a la otra.
+SESSION_COOKIE_PATH = FORCE_SCRIPT_NAME or '/'
+CSRF_COOKIE_PATH = SESSION_COOKIE_PATH
+
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
@@ -164,12 +204,20 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # cada día y las timbradas de cada bus con TTL de hasta 24 h, y sin cache cada
 # consulta le vuelve a pegar al API día por día y bus por bus.
 #
-# Con REDIS_URL puesto se usa Redis. Eso es lo que hace falta en un hosting
-# serverless como Vercel, donde cada petición puede caer en una instancia
-# distinta y las instancias se congelan entre peticiones: un cache en memoria
-# arrancaría vacío casi siempre. Sin la variable queda el cache en memoria del
-# proceso, que le basta a un servidor de toda la vida (Render) y al desarrollo
-# local, y así ninguno de los dos necesita un Redis al lado.
+# Sin REDIS_URL queda el cache en memoria del proceso, y con Passenger eso es
+# justo lo que hace falta: Passenger levanta procesos de Python que siguen
+# vivos entre peticiones, así que el cache se llena una vez y lo aprovechan
+# las siguientes. Es lo mismo que pasa en desarrollo, y por eso ninguno de los
+# dos necesita un Redis al lado.
+#
+# REDIS_URL se pone solo si algún día la aplicación corre en varios procesos
+# que tengan que compartir el cache, o en un hosting que congele el proceso
+# entre peticiones (los serverless tipo Vercel o Lambda), donde un cache en
+# memoria arrancaría vacío casi siempre.
+#
+# Ojo en hosting compartido: Passenger apaga el proceso tras unos minutos sin
+# visitas (PassengerPoolIdleTime), y al apagarse el cache en memoria se va con
+# él. La primera visita después de un rato largo es la lenta.
 REDIS_URL = os.getenv('REDIS_URL', '')
 
 if REDIS_URL:
@@ -303,6 +351,47 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+# Quien sirve los estáticos es WhiteNoise (está en MIDDLEWARE), no Apache:
+# lee los archivos de STATIC_ROOT, así que en el servidor hay que correr
+# `python manage.py collectstatic` después de cada despliegue. Sin eso el
+# dashboard carga sin CSS y el /admin/ se ve en texto plano.
+#
+# STATIC_URL lleva delante la subcarpeta, si la hay, porque es la URL que
+# acaba escrita en el HTML y el navegador la pide tal cual. WhiteNoise, en
+# cambio, compara contra la ruta que le llega ya sin la subcarpeta (Passenger
+# se la queda en SCRIPT_NAME): esa resta la hace él solo, mirando
+# FORCE_SCRIPT_NAME, y por eso las dos puntas coinciden.
+STATIC_URL = f'{FORCE_SCRIPT_NAME}/static/' if FORCE_SCRIPT_NAME else '/static/'
 
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# collectstatic deja además una copia .gz de cada archivo de texto y
+# WhiteNoise sirve esa cuando el navegador la acepta. En un hosting compartido
+# el ancho de banda y la CPU son el cuello de botella, y comprimir una vez al
+# desplegar sale más barato que comprimir en cada visita.
+#
+# Es la versión *sin* manifiesto a propósito: la que renombra los archivos con
+# un hash revienta el despliegue entero si una plantilla pide con
+# `{% static %}` un archivo que no existe, y aquí hay 34 imágenes llamadas a
+# mano en home.html.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
+    },
+}
+
+
+# Tipo de la columna `id` que Django le pone a un modelo que no declara clave
+# primaria. Las tablas que ya están en Supabase se crearon con BigAutoField
+# (bigint), y aquí se dice explícitamente para que siga siendo así.
+#
+# Django 6.0 ya usa BigAutoField por defecto, así que esta línea no cambia
+# nada hoy. Está por si algún día hay que bajar a Django 5.2 LTS —porque el
+# hosting no tenga Python 3.12—: ahí el valor de fábrica es AutoField
+# (integer), y sin esta línea Django creería que las tablas van en integer y
+# `makemigrations` generaría un ALTER para encoger las columnas de la base de
+# producción. La línea vale para las dos versiones y evita esa sorpresa.
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

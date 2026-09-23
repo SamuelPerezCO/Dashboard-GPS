@@ -88,7 +88,7 @@ nombre de la geocerca. No hay que tocar nada.
 
 ## Requisitos
 
-- Python 3.14
+- Python 3.12 o superior (Django 6.0 no arranca con 3.11)
 - Credenciales del WebService de Service24GPS
 
 ## Instalación
@@ -106,7 +106,14 @@ El login queda en <http://localhost:8000/>, la portada pública en
 
 ## Configuración (`.env`)
 
-El archivo `.env` va junto a `manage.py` y **nunca se sube a git**:
+El archivo `.env` va junto a `manage.py` y **nunca se sube a git**. Hay una
+plantilla lista para copiar en `.env.example`, con todas las variables
+comentadas y sin ninguna credencial de verdad:
+
+```bash
+cp .env.example .env
+```
+
 
 ```ini
 GPS_API_BASE_URL=https://api.service24gps.com/api/v1
@@ -335,6 +342,8 @@ de mostrar un cero limpio, porque un fallo se ve igual que "no llevó pasajeros"
 ## Estructura
 
 ```
+passenger_wsgi.py  puerta de entrada de Passenger (cPanel); apunta a config/wsgi
+.env.example       plantilla de las variables de entorno, sin credenciales
 config/            settings, urls y wsgi del proyecto Django
 tracking/
   api_client.py    cliente del WebService (token, cache, reintentos)
@@ -350,21 +359,45 @@ El dashboard de mapa en vivo existe en `/mapa/` pero no está en el menú, y es
 solo para las cuentas con acceso total: muestra la flota completa, que no está
 repartida por empresa.
 
-## Despliegue (Render)
+## Despliegue (cPanel + Passenger)
 
-Las peticiones a la GPS API siguen sin tocar base de datos, y la sesión del
-login sigue viajando en una cookie firmada. Lo que sí vive en base de
-datos ahora son las cuentas del dashboard (`DashboardUsuario`), en Postgres
-de Supabase — el disco de Render es efímero, así que no puede ser
-`db.sqlite3`.
+El hosting es un cPanel compartido con «Setup Python App», que por debajo es
+CloudLinux + Phusion Passenger. Passenger no ejecuta `manage.py runserver` ni
+gunicorn: importa `passenger_wsgi.py` y busca dentro la variable
+`application`. Ese archivo no hace más que apuntar a `config/wsgi.py`, que es
+el mismo WSGI de siempre.
 
-El build necesita:
+Las peticiones a la GPS API siguen sin tocar base de datos y la sesión del
+login sigue viajando en una cookie firmada. Lo que sí vive en base de datos
+son las cuentas del dashboard (`DashboardUsuario`), en el Postgres de
+Supabase.
+
+### El formulario «Create Application»
+
+| Campo | Valor |
+|---|---|
+| Python version | **3.12 o superior** (Django 6.0 no arranca con 3.11) |
+| Application root | `dashboard_gps` (la carpeta del proyecto dentro de tu home) |
+| Application URL | el dominio, y la subcarpeta si no va en la raíz |
+| Application startup file | `passenger_wsgi.py` |
+| Application Entry point | `application` |
+
+«Application root» es una ruta **relativa a tu home**: si el proyecto está en
+`/home/usuario/dashboard_gps`, aquí va `dashboard_gps` a secas.
+
+### Puesta en marcha
+
+cPanel crea el virtualenv y muestra arriba de la página el comando para
+activarlo (`source /home/.../bin/activate`). Con el entorno activado:
 
 ```bash
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py collectstatic --no-input
 ```
+
+`collectstatic` hay que repetirlo **cada vez que se despliega**: WhiteNoise
+sirve los estáticos desde `staticfiles/`, y esa carpeta no está en git.
 
 La primera vez, además:
 
@@ -376,19 +409,51 @@ python manage.py createsuperuser
 python manage.py crear_usuario_dashboard samuel@rastrelital.com --acceso-total
 ```
 
-De ahí en adelante, las cuentas del dashboard se crean, editan y desactivan
-desde `/admin/` — no hace falta volver a tocar variables de entorno ni
-redesplegar.
+De ahí en adelante, las cuentas se crean, editan y desactivan desde `/admin/`
+— no hace falta volver a tocar variables de entorno ni redesplegar.
 
-Variables de entorno que hay que poner en Render:
+Para que un cambio surta efecto: el botón «Restart» de cPanel, o
+`touch tmp/restart.txt` en la carpeta de la aplicación. Passenger no recarga
+el código solo.
+
+### Variables de entorno
+
+Se ponen en «Setup Python App» > Environment variables, o en un `.env` junto a
+`manage.py`. Si una está en los dos sitios gana la de cPanel. La lista
+completa, con ejemplos, está en `.env.example`.
 
 | Variable | Por qué |
 |---|---|
 | `DJANGO_DEBUG` | **`0`.** Con `1`, cualquier error muestra el código, las variables locales y las credenciales a quien entre. |
-| `DJANGO_SECRET_KEY` | Firma la cookie de sesión. Si falta, se usa la clave de ejemplo que está en el repo y **cualquiera podría fabricarse una sesión válida**. |
-| `DATABASE_URL` | Conexión a Postgres de Supabase (usa el "Transaction pooler", puerto 6543). Sin ella cae a sqlite, que en Render se pierde en cada redeploy. |
+| `DJANGO_SECRET_KEY` | Firma la cookie de sesión. Si falta se usa la clave de ejemplo del repositorio, y **cualquiera podría fabricarse una sesión válida**. |
+| `DJANGO_ALLOWED_HOSTS` | El dominio del hosting, separado por comas si hay varios. Si falta, Django contesta 400 a todo. |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | Los mismos dominios con `https://` delante. Si falta, el login contesta «CSRF verification failed». |
+| `DJANGO_FORCE_SCRIPT_NAME` | Solo si la aplicación **no** está en la raíz del dominio: `/dashboard` para `https://dominio.com/dashboard/`. Tiene que coincidir con el «Application URL» de cPanel. |
+| `DATABASE_URL` | Postgres de Supabase (usa el «Transaction pooler», puerto 6543). Sin ella cae a un sqlite suelto dentro del hosting. |
 | `GPS_APIKEY`, `GPS_USERNAME`, `GPS_PASSWORD` | Acceso al WebService. |
-| `DASHBOARD_CORREO_ADMIN` + `DASHBOARD_CLAVE_ADMIN` | Opcionales, y van juntas: el acceso de emergencia para cuando la base no conteste. Sin ellas, con `DJANGO_DEBUG=0` no hay ninguna cuenta de settings y se entra solo con las de la tabla. |
+| `DASHBOARD_CORREO_ADMIN` + `DASHBOARD_CLAVE_ADMIN` | Opcionales, y van juntas: el acceso de emergencia para cuando la base no conteste. |
+
+### Si va en una subcarpeta
+
+Montar la aplicación en `https://dominio.com/dashboard/` en vez de en la raíz
+necesita **una sola cosa**: `DJANGO_FORCE_SCRIPT_NAME=/dashboard`.
+
+Los enlaces (`{% url %}`, `reverse()`, los redirect del login) saldrían bien
+igual, porque Passenger avisa de la subcarpeta en cada petición. Los
+estáticos no: Django calcula `STATIC_URL` una sola vez, al cargar el WSGI,
+cuando todavía no hay ninguna petición de la que sacar el prefijo. Sin esa
+variable el HTML pide el CSS a `/static/...` en la raíz del dominio, donde no
+hay nada, y el dashboard se ve sin estilos.
+
+Puesta de más no duplica el prefijo (sustituye al que manda Passenger), pero
+puesta cuando la aplicación está en la raíz sí rompe los enlaces: tiene que
+decir la verdad.
+
+### Otros hostings
+
+El proyecto sigue arrancando con gunicorn (`gunicorn config.wsgi`) en Render,
+un VPS o docker, sin tocar nada: `passenger_wsgi.py` solo estorba a quien no
+sea Passenger, y nadie lo importa si no se lo piden.
 
 ## Licencia
 

@@ -1,12 +1,32 @@
 # Dependencias del proyecto Dashboard GPS.
 # Instalar con: pip install -r requirements.txt
+#
+# En cPanel («Setup Python App») no se instala a mano: se pone este archivo en
+# el campo «Configuration files» y se pulsa «Run Pip Install», o se usa la
+# consola del entorno virtual que la propia página muestra arriba.
+#
+# Van todas con la versión clavada (==) a propósito: el servidor instala meses
+# después que tu máquina, y sin la versión exacta se traería la última de cada
+# una. Django 6.1 saldría sola y podría romper el proyecto sin que nadie haya
+# tocado una línea de código.
 
-Django==6.0.7            # framework web (vistas, plantillas, cache)
+Django==6.0.7            # framework web (vistas, plantillas, cache).
+                         # OJO: Django 6.0 necesita Python 3.12 o más nuevo.
+                         # Si en cPanel solo hay 3.11, hay que bajar a
+                         # Django==5.2.x (LTS) o pedir un Python más nuevo.
 requests==2.34.2         # peticiones HTTP al WebService de Service24GPS
-python-dotenv==1.2.2     # carga las credenciales del archivo .env
-gunicorn==26.0.0         # servidor web de producción (lo usa Render)
-whitenoise==6.12.0       # sirve los archivos estáticos (CSS del admin, etc.)
+python-dotenv==1.2.2     # lee el archivo .env (config/settings.py lo carga)
+whitenoise==6.12.0       # sirve los archivos estáticos desde el propio Python,
+                         # sin depender de cómo esté configurado el Apache
 redis==6.4.0             # cliente del cache compartido (solo si hay REDIS_URL)
-psycopg2-binary==2.9.12   # driver de Postgres (Supabase), solo si hay DATABASE_URL
-dj-database-url==3.1.2    # parsea DATABASE_URL para el DATABASES de Django
-openpyxl==3.1.5           # lee archivos .xlsx (import_flota_xlsx)
+psycopg2-binary==2.9.12  # driver de Postgres (Supabase), solo si hay DATABASE_URL.
+                         # La versión «-binary» trae el C ya compilado: en un
+                         # hosting compartido no hay compilador ni cabeceras de
+                         # Postgres, así que la normal (psycopg2) fallaría.
+dj-database-url==3.1.2   # parsea DATABASE_URL para el DATABASES de Django
+openpyxl==3.1.5          # lee archivos .xlsx (import_flota_xlsx)
+
+# Passenger NO usa gunicorn: importa passenger_wsgi.py por su cuenta. Se queda
+# aquí para poder levantar el proyecto en un servidor normal (Render, un VPS,
+# docker) sin tocar nada. Si estorba, se puede borrar esta línea.
+gunicorn==26.0.0
