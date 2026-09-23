@@ -5,6 +5,11 @@ db.sqlite3
 #Excel (reportes generados)
 *.xls
 *.xlsx
+# La planilla de flota no es un reporte generado: es dato de entrada, y sin
+# ella `import_flota_xlsx` no tiene de dónde sacar el contrato y la ruta de
+# cada bus. Va al repositorio para que un despliegue nuevo no dependa de que
+# alguien se acuerde de subirla a mano.
+!FLOTA JHON RASTRELITAL (1).xlsx
 
 #Notas y reportes sueltos
 *.md
