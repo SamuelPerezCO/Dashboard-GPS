@@ -325,6 +325,23 @@ if DATABASE_URL:
             ssl_require=_es_postgres,
         ),
     }
+
+    if not _es_postgres:
+        # Modo estricto de MySQL/MariaDB.
+        #
+        # De fábrica, MariaDB no se queja cuando un valor no cabe en su
+        # columna: lo recorta y sigue. Con los largos de tracking.models eso
+        # es un destrozo silencioso —una RUTA de más de 40 caracteres o una
+        # placa de más de 10 entran a medias y el import dice que todo fue
+        # bien—, y luego no hay forma de saber qué se perdió.
+        #
+        # Con STRICT_TRANS_TABLES el recorte pasa a ser un error, que es lo
+        # que hace Django en sqlite y en Postgres. Va como init_command
+        # porque se aplica a la sesión, así que tiene que correr al abrir
+        # cada conexión, no una sola vez.
+        DATABASES['default'].setdefault('OPTIONS', {})['init_command'] = (
+            "SET sql_mode='STRICT_TRANS_TABLES'"
+        )
 else:
     DATABASES = {
         'default': {
