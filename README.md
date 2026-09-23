@@ -462,32 +462,47 @@ pooler» (puerto 6543). Solo con este motor pide Django el SSL, porque la
 conexión sale a internet; el MySQL de cPanel no lo necesita y su conector ni
 siquiera entiende el parámetro.
 
-### Si mysqlclient no compila
+### El driver de MySQL: por qué PyMySQL y no mysqlclient
 
-`mysqlclient` es una extensión en C y necesita las cabeceras de MySQL para
-instalarse. En la mayoría de los cPanel están, pero si `pip install` se cae
-con «Can't find mysql_config» o similar, la salida es PyMySQL, que es Python
-puro y siempre instala:
+El driver que Django documenta es `mysqlclient`, y es el que habría que usar
+en cualquier servidor normal. Aquí no se puede: es una extensión en C y este
+hosting tiene el compilador cerrado a los usuarios, así que su instalación
+muere con
 
-```bash
-pip install PyMySQL==1.1.1
+```
+error: [Errno 13] Permission denied: 'gcc'
 ```
 
-Y en `config/__init__.py`:
+No es que falten las cabeceras de MySQL —están, el build las encuentra en
+`/usr/include/mysql`—, es que no hay permiso para ejecutar `gcc`. No se
+arregla con configuración.
+
+Por eso en `requirements.txt` va **PyMySQL**, que habla el mismo protocolo en
+Python puro y por tanto siempre instala. A cambio hay que registrarlo bajo el
+nombre que Django busca, y eso es lo único que hace `config/__init__.py`:
 
 ```python
-import pymysql
-
-# Django 6.0 exige mysqlclient 2.2.1+ y comprueba la versión del módulo que
-# encuentra como MySQLdb. PyMySQL habla el mismo protocolo pero se numera por
-# su cuenta (1.1.x), así que sin esta línea Django se niega a arrancar.
 pymysql.version_info = (2, 2, 7, 'final', 0)
+pymysql.__version__ = '2.2.7'
 pymysql.install_as_MySQLdb()
 ```
 
-Va en `config/__init__.py` y no en `passenger_wsgi.py` porque tiene que
-ejecutarse antes de que Django importe el backend, y eso pasa también en
-`manage.py migrate`, que no toca Passenger.
+Las dos primeras líneas no son decorativas. Django 6.0 exige mysqlclient
+2.2.1 o superior y lo comprueba leyendo `version_info` del módulo que
+encuentre como `MySQLdb`; PyMySQL se numera por su cuenta (1.1.x), así que
+sin ese ajuste Django se planta con «mysqlclient 2.2.1 or newer is required»
+aunque el driver funcione.
+
+Va en `config/__init__.py` —y no en `passenger_wsgi.py`— porque tiene que
+correr antes de que Django importe el backend de MySQL, y ese momento llega
+tanto por Passenger como por `manage.py migrate`, que no pasa por Passenger.
+El `__init__` del paquete de settings es el único punto por el que pasan los
+dos. El `try/except ImportError` que lo envuelve deja el proyecto funcionando
+en una máquina sin PyMySQL, que es el caso de desarrollo con sqlite.
+
+Si algún día el hosting deja compilar, volver a `mysqlclient==2.2.7` en
+`requirements.txt` y borrar el contenido de `config/__init__.py` es todo el
+cambio.
 
 ### Si va en una subcarpeta
 
